@@ -1,0 +1,440 @@
+import React, { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import {
+  Alert,
+  Autocomplete,
+  Box,
+  Button,
+  Card,
+  CardContent,
+  Checkbox,
+  Chip,
+  Grid,
+  Stack,
+  TextField,
+  Typography
+} from "@mui/material";
+import { DataGrid, GridActionsCellItem, GridToolbar } from "@mui/x-data-grid";
+import { createFilterOptions } from "@mui/material/Autocomplete";
+import DeleteIcon from "@mui/icons-material/Delete";
+import EditIcon from "@mui/icons-material/Edit";
+import RefreshIcon from "@mui/icons-material/Refresh";
+import SaveIcon from "@mui/icons-material/Save";
+import MenuPageShell from "./MenuPageShell";
+import ep1 from "../api/ep1";
+import global1 from "./global1";
+import { embeddedAwarePath } from "./addableAutocompleteHelpers";
+
+const emptyForm = {
+  id: "",
+  username: "",
+  useremail: "",
+  userid: "",
+  program: "",
+  programcode: "",
+  semester: "",
+  department: ""
+};
+
+const SELECT_ALL_USERS = { _id: "__all_users__", name: "Select all users", email: "" };
+const SELECT_ALL_PROGRAMS = { _id: "__all_programs__", program: "Select all programs", programcode: "" };
+const ADD_USER = { _id: "__add_user__", name: "Add non-student user", email: "", __addOption: true, path: "/mbuser" };
+const ADD_PROGRAM = { _id: "__add_program__", program: "Add program", programcode: "", __addOption: true, path: "/programmanagement" };
+const SELECT_ALL_SEMESTERS = "__all_semesters__";
+const autocompleteFilter = createFilterOptions();
+
+function userLabel(user) {
+  if (!user) return "";
+  if (user.__addOption) return user.name || "";
+  return `${user.name || "No name"} - ${user.email || "No email"}${user.role ? ` (${user.role})` : ""}`;
+}
+
+function programLabel(program) {
+  if (!program) return "";
+  if (program.__addOption) return program.program || "";
+  return `${program.program || "Program"} (${program.programcode || "Code"})${program.department ? ` - ${program.department}` : ""}`;
+}
+
+export default function ProgramwiseAccessPage() {
+  const navigate = useNavigate();
+  const [users, setUsers] = useState([]);
+  const [programs, setPrograms] = useState([]);
+  const [rows, setRows] = useState([]);
+  const [form, setForm] = useState(emptyForm);
+  const [selectedUsers, setSelectedUsers] = useState([]);
+  const [selectedPrograms, setSelectedPrograms] = useState([]);
+  const [selectedSemesters, setSelectedSemesters] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const semesterOptions = useMemo(() => {
+    const saved = rows.map((row) => row.semester).filter(Boolean);
+    return [...new Set(["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", ...saved])];
+  }, [rows]);
+
+  const loadAll = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const [optionRes, listRes] = await Promise.all([
+        ep1.get("/api/v2/programwiseaccess/options", { params: { colid: global1.colid } }),
+        ep1.get("/api/v2/programwiseaccess", { params: { colid: global1.colid } })
+      ]);
+      setUsers(optionRes.data?.users || []);
+      setPrograms(optionRes.data?.programs || []);
+      setRows(listRes.data?.data || []);
+    } catch (err) {
+      setError(err.response?.data?.message || err.message || "Unable to load programwise access");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadAll();
+  }, []);
+
+  const selectUsers = (value) => {
+    if (value.some((item) => item._id === SELECT_ALL_USERS._id)) {
+      const allSelected = selectedUsers.length === users.length;
+      const next = allSelected ? [] : users;
+      setSelectedUsers(next);
+      if (next.length === 1) {
+        const user = next[0];
+        setForm((prev) => ({
+          ...prev,
+          username: user?.name || "",
+          useremail: user?.email || "",
+          userid: user?._id || ""
+        }));
+      }
+      return;
+    }
+    setSelectedUsers(value);
+    const user = value.length === 1 ? value[0] : null;
+    setForm((prev) => ({
+      ...prev,
+      username: user?.name || "",
+      useremail: user?.email || "",
+      userid: user?._id || ""
+    }));
+  };
+
+  const selectPrograms = (value) => {
+    if (value.some((item) => item._id === SELECT_ALL_PROGRAMS._id)) {
+      const allSelected = selectedPrograms.length === programs.length;
+      const next = allSelected ? [] : programs;
+      setSelectedPrograms(next);
+      if (next.length === 1) {
+        const program = next[0];
+        setForm((prev) => ({
+          ...prev,
+          program: program?.program || "",
+          programcode: program?.programcode || "",
+          department: program?.department || ""
+        }));
+      }
+      return;
+    }
+    setSelectedPrograms(value);
+    const program = value.length === 1 ? value[0] : null;
+    setForm((prev) => ({
+      ...prev,
+      program: program?.program || "",
+      programcode: program?.programcode || "",
+      department: program?.department || ""
+    }));
+  };
+
+  const selectSemesters = (value) => {
+    const incoming = (value || []).map((item) => String(item || "").trim()).filter(Boolean);
+    if (incoming.includes(SELECT_ALL_SEMESTERS)) {
+      const allSelected = selectedSemesters.length === semesterOptions.length && semesterOptions.length > 0;
+      const next = allSelected ? [] : semesterOptions;
+      setSelectedSemesters(next);
+      setForm((prev) => ({ ...prev, semester: next.join(", ") }));
+      return;
+    }
+    const next = [...new Set(incoming.filter((item) => item !== SELECT_ALL_SEMESTERS))];
+    setSelectedSemesters(next);
+    setForm((prev) => ({ ...prev, semester: next.join(", ") }));
+  };
+
+  const resetForm = () => {
+    setForm(emptyForm);
+    setSelectedUsers([]);
+    setSelectedPrograms([]);
+    setSelectedSemesters([]);
+  };
+
+  const save = async () => {
+    setSaving(true);
+    setError("");
+    setMessage("");
+    try {
+      const semesterList = selectedSemesters.length ? selectedSemesters : [""];
+      if (form.id && selectedUsers.length === 1 && selectedPrograms.length === 1 && semesterList.length === 1) {
+        await ep1.post("/api/v2/programwiseaccess", {
+          ...form,
+          semester: semesterList[0],
+          colid: global1.colid,
+          user: global1.user,
+          createdby: global1.user
+        });
+        setMessage("Program access saved.");
+      } else {
+        const entries = selectedUsers.flatMap((user) =>
+          selectedPrograms.flatMap((program) =>
+            semesterList.map((semester) => ({
+              username: user?.name || "",
+              useremail: user?.email || "",
+              userid: user?._id || "",
+              program: program?.program || "",
+              programcode: program?.programcode || "",
+              semester,
+              department: program?.department || ""
+            }))
+          )
+        );
+        const res = await ep1.post("/api/v2/programwiseaccess", {
+          colid: global1.colid,
+          user: global1.user,
+          createdby: global1.user,
+          entries
+        });
+        setMessage(res.data?.message || "Program access saved.");
+      }
+      resetForm();
+      await loadAll();
+    } catch (err) {
+      setError(err.response?.data?.message || err.message || "Unable to save program access");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const editRow = (row) => {
+    const user = users.find((item) => item.email === row.useremail) || null;
+    const program = programs.find((item) => item.programcode === row.programcode) || null;
+    const semester = row.semester ? [row.semester] : [];
+    setSelectedUsers(user ? [user] : []);
+    setSelectedPrograms(program ? [program] : []);
+    setSelectedSemesters(semester);
+    setForm({
+      id: row._id,
+      username: row.username || "",
+      useremail: row.useremail || "",
+      userid: row.userid || "",
+      program: row.program || "",
+      programcode: row.programcode || "",
+      semester: row.semester || "",
+      department: row.department || ""
+    });
+  };
+
+  const deleteRow = async (row) => {
+    if (!window.confirm("Delete this program access?")) return;
+    setLoading(true);
+    setError("");
+    try {
+      await ep1.post("/api/v2/programwiseaccess/delete", { id: row._id, colid: global1.colid });
+      setMessage("Program access deleted.");
+      await loadAll();
+    } catch (err) {
+      setError(err.response?.data?.message || err.message || "Unable to delete program access");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const columns = useMemo(
+    () => [
+      { field: "username", headerName: "User", minWidth: 180, flex: 1 },
+      { field: "useremail", headerName: "Email", minWidth: 220, flex: 1 },
+      { field: "department", headerName: "Department", minWidth: 170, flex: 1 },
+      { field: "program", headerName: "Program", minWidth: 220, flex: 1 },
+      { field: "programcode", headerName: "Program Code", minWidth: 150 },
+      { field: "semester", headerName: "Semester", minWidth: 120, valueGetter: (params) => params.row.semester || "All" },
+      {
+        field: "actions",
+        type: "actions",
+        headerName: "Actions",
+        width: 110,
+        getActions: (params) => [
+          <GridActionsCellItem icon={<EditIcon />} label="Edit" onClick={() => editRow(params.row)} />,
+          <GridActionsCellItem icon={<DeleteIcon />} label="Delete" onClick={() => deleteRow(params.row)} />
+        ]
+      }
+    ],
+    [users, programs]
+  );
+
+  return (
+    <MenuPageShell title="Programwise access">
+      <Stack spacing={2}>
+        {error && <Alert severity="error">{error}</Alert>}
+        {message && <Alert severity="success">{message}</Alert>}
+
+        <Card sx={{ borderRadius: 2 }}>
+          <CardContent>
+            <Typography variant="h6" fontWeight={800} gutterBottom>
+              Assign program access
+            </Typography>
+            <Grid container spacing={2} alignItems="center">
+              <Grid item xs={12} md={5}>
+                <Autocomplete
+                  multiple
+                  disableCloseOnSelect
+                  options={[ADD_USER, SELECT_ALL_USERS, ...users]}
+                  filterOptions={(options, params) => [
+                    ADD_USER,
+                    SELECT_ALL_USERS,
+                    ...autocompleteFilter(options.filter((option) => option._id !== SELECT_ALL_USERS._id && option._id !== ADD_USER._id), params)
+                  ]}
+                  value={selectedUsers}
+                  onChange={(_, value) => {
+                    if ((value || []).some((item) => item.__addOption)) {
+                      navigate(embeddedAwarePath("/mbuser"));
+                      return;
+                    }
+                    selectUsers(value);
+                  }}
+                  getOptionLabel={userLabel}
+                  isOptionEqualToValue={(option, value) => option._id === value._id}
+                  renderOption={(props, option, { selected }) => {
+                    const isAdd = option._id === ADD_USER._id;
+                    const isSelectAll = option._id === SELECT_ALL_USERS._id;
+                    const checked = isSelectAll ? selectedUsers.length === users.length && users.length > 0 : selected;
+                    return (
+                      <li {...props} style={isAdd ? { fontWeight: 800, color: "#2563eb" } : undefined}>
+                        {!isAdd && <Checkbox checked={checked} sx={{ mr: 1 }} />}
+                        {userLabel(option)}
+                      </li>
+                    );
+                  }}
+                  renderTags={(value, getTagProps) =>
+                    value.slice(0, 3).map((option, index) => (
+                      <Chip size="small" label={userLabel(option)} {...getTagProps({ index })} />
+                    )).concat(value.length > 3 ? [<Chip key="more-users" size="small" label={`+${value.length - 3} more`} />] : [])
+                  }
+                  renderInput={(params) => <TextField {...params} label="Search and select users" />}
+                />
+              </Grid>
+              <Grid item xs={12} md={5}>
+                <Autocomplete
+                  multiple
+                  disableCloseOnSelect
+                  options={[ADD_PROGRAM, SELECT_ALL_PROGRAMS, ...programs]}
+                  filterOptions={(options, params) => [
+                    ADD_PROGRAM,
+                    SELECT_ALL_PROGRAMS,
+                    ...autocompleteFilter(options.filter((option) => option._id !== SELECT_ALL_PROGRAMS._id && option._id !== ADD_PROGRAM._id), params)
+                  ]}
+                  value={selectedPrograms}
+                  onChange={(_, value) => {
+                    if ((value || []).some((item) => item.__addOption)) {
+                      navigate(embeddedAwarePath("/programmanagement"));
+                      return;
+                    }
+                    selectPrograms(value);
+                  }}
+                  getOptionLabel={programLabel}
+                  isOptionEqualToValue={(option, value) => option._id === value._id}
+                  renderOption={(props, option, { selected }) => {
+                    const isAdd = option._id === ADD_PROGRAM._id;
+                    const isSelectAll = option._id === SELECT_ALL_PROGRAMS._id;
+                    const checked = isSelectAll ? selectedPrograms.length === programs.length && programs.length > 0 : selected;
+                    return (
+                      <li {...props} style={isAdd ? { fontWeight: 800, color: "#2563eb" } : undefined}>
+                        {!isAdd && <Checkbox checked={checked} sx={{ mr: 1 }} />}
+                        {programLabel(option)}
+                      </li>
+                    );
+                  }}
+                  renderTags={(value, getTagProps) =>
+                    value.slice(0, 3).map((option, index) => (
+                      <Chip size="small" label={programLabel(option)} {...getTagProps({ index })} />
+                    )).concat(value.length > 3 ? [<Chip key="more-programs" size="small" label={`+${value.length - 3} more`} />] : [])
+                  }
+                  renderInput={(params) => <TextField {...params} label="Search and select programs" />}
+                />
+              </Grid>
+              <Grid item xs={12} md={2}>
+                <Autocomplete
+                  multiple
+                  disableCloseOnSelect
+                  freeSolo
+                  options={[SELECT_ALL_SEMESTERS, ...semesterOptions]}
+                  filterOptions={(options, params) => [
+                    SELECT_ALL_SEMESTERS,
+                    ...autocompleteFilter(options.filter((option) => option !== SELECT_ALL_SEMESTERS), params)
+                  ]}
+                  value={selectedSemesters}
+                  onChange={(_, value) => selectSemesters(value)}
+                  getOptionLabel={(option) => (option === SELECT_ALL_SEMESTERS ? "Select all semesters" : String(option || ""))}
+                  renderOption={(props, option, { selected }) => {
+                    const isSelectAll = option === SELECT_ALL_SEMESTERS;
+                    const checked = isSelectAll ? selectedSemesters.length === semesterOptions.length && semesterOptions.length > 0 : selected;
+                    return (
+                      <li {...props}>
+                        <Checkbox checked={checked} sx={{ mr: 1 }} />
+                        {isSelectAll ? "Select all semesters" : option}
+                      </li>
+                    );
+                  }}
+                  renderTags={(value, getTagProps) =>
+                    value.slice(0, 2).map((option, index) => (
+                      <Chip size="small" label={option} {...getTagProps({ index })} />
+                    )).concat(value.length > 2 ? [<Chip key="more-semesters" size="small" label={`+${value.length - 2} more`} />] : [])
+                  }
+                  renderInput={(params) => <TextField {...params} label="Semester" helperText="Select one or more. Blank means all semesters." />}
+                />
+              </Grid>
+              <Grid item xs={12}>
+                <Stack direction="row" spacing={1}>
+                  <Button
+                    variant="contained"
+                    startIcon={<SaveIcon />}
+                    disabled={saving || selectedUsers.length === 0 || selectedPrograms.length === 0}
+                    onClick={save}
+                  >
+                    {saving ? "Saving..." : "Save"}
+                  </Button>
+                  <Button variant="outlined" onClick={resetForm}>
+                    Clear
+                  </Button>
+                </Stack>
+              </Grid>
+            </Grid>
+          </CardContent>
+        </Card>
+
+        <Card sx={{ borderRadius: 2 }}>
+          <CardContent>
+            <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
+              <Typography variant="h6" fontWeight={800}>
+                Access list
+              </Typography>
+              <Button startIcon={<RefreshIcon />} onClick={loadAll} disabled={loading}>
+                Refresh
+              </Button>
+            </Stack>
+            <Box sx={{ height: 540, width: "100%" }}>
+              <DataGrid
+                rows={rows}
+                columns={columns}
+                getRowId={(row) => row._id}
+                loading={loading}
+                pageSizeOptions={[25, 50, 100]}
+                initialState={{ pagination: { paginationModel: { pageSize: 25 } } }}
+                slots={{ toolbar: GridToolbar }}
+                disableRowSelectionOnClick
+              />
+            </Box>
+          </CardContent>
+        </Card>
+      </Stack>
+    </MenuPageShell>
+  );
+}
