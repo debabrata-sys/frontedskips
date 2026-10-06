@@ -1,5 +1,5 @@
 [build]
-  command = "cross-env GENERATE_SOURCEMAP=false DISABLE_ESLINT_PLUGIN=true CI=false NODE_OPTIONS=--max-old-space-size=1536 react-scripts build"
+  command = "cross-env GENERATE_SOURCEMAP=false DISABLE_ESLINT_PLUGIN=true CI=false NODE_OPTIONS=--max-old-space-size=4096 react-scripts build"
   publish = "build"
 
 [build.environment]
@@ -8,7 +8,7 @@
   GENERATE_SOURCEMAP = "false"
   DISABLE_ESLINT_PLUGIN = "true"
   CI = "false"
-  NODE_OPTIONS = "--max-old-space-size=1536"
+  NODE_OPTIONS = "--max-old-space-size=4096"
 
 [[redirects]]
   from = "/*"
