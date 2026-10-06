@@ -1,5 +1,5 @@
 [build]
-  command = "cross-env GENERATE_SOURCEMAP=false DISABLE_ESLINT_PLUGIN=true CI=false NODE_OPTIONS=--max-old-space-size=4096 react-scripts build"
+  command = "cross-env GENERATE_SOURCEMAP=false DISABLE_ESLINT_PLUGIN=true INLINE_RUNTIME_CHUNK=false CI=false NODE_OPTIONS=--max-old-space-size=6144 react-scripts build"
   publish = "build"
 
 [build.environment]
@@ -7,8 +7,9 @@
   NPM_FLAGS = "--legacy-peer-deps"
   GENERATE_SOURCEMAP = "false"
   DISABLE_ESLINT_PLUGIN = "true"
+  INLINE_RUNTIME_CHUNK = "false"
   CI = "false"
-  NODE_OPTIONS = "--max-old-space-size=4096"
+  NODE_OPTIONS = "--max-old-space-size=6144"
 
 [[redirects]]
   from = "/*"
