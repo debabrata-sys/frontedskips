@@ -34,10 +34,22 @@ const steps = [
     description: "Populate courses for selected programs using regulation course map data."
   },
   {
+    title: "Populate Exam Courses 2",
+    path: "/conduct-exam-populate-courses-2",
+    icon: <Assignment />,
+    description: "Populate exam courses filtered by course type and delivery type."
+  },
+  {
     title: "Exam Auto Scheduler 3",
     path: "/conduct-exam-auto-scheduler-3",
     icon: <Today />,
     description: "Allocate dates and slots using configured slots, date ranges, and optional holiday-list checking."
+  },
+  {
+    title: "Exam Scheduler Manual",
+    path: "/conduct-exam-scheduler-manual",
+    icon: <Today />,
+    description: "Manually add, edit, bulk upload, and delete coursewise exam dates and slots."
   },
   {
     title: "Exam Scheduler Report",
@@ -58,10 +70,40 @@ const steps = [
     description: "Load exam roll students, select one or more rows, and print barcode stickers using MongoDB codes."
   },
   {
+    title: "Exam Barcode 2",
+    path: "/conduct-exam-barcode-2",
+    icon: <Badge />,
+    description: "Print 100mm x 25mm exam barcode stickers in section-wise attendance format."
+  },
+  {
+    title: "Exam Barcode 3",
+    path: "/conduct-exam-barcode-3",
+    icon: <Badge />,
+    description: "Print 100mm x 26mm labels with 8 digit scanner friendly barcodes."
+  },
+  {
+    title: "Exam Barcode 4",
+    path: "/conduct-exam-barcode-4",
+    icon: <Badge />,
+    description: "Print a full-width 100mm x 26mm barcode label with exam code and section in spare space."
+  },
+  {
+    title: "Exam Barcode 5",
+    path: "/conduct-exam-barcode-5",
+    icon: <Badge />,
+    description: "Print right-aligned 100mm x 26mm barcode labels when browser scaling leaves unused space."
+  },
+  {
     title: "Seat Allocation",
     path: "/conduct-exam-seat-allocation",
     icon: <Assignment />,
     description: "Allocate seats and rooms for eligible exam roll students after barcode generation."
+  },
+  {
+    title: "Manual Seat Allocation",
+    path: "/conduct-exam-manual-seat-allocation",
+    icon: <Assignment />,
+    description: "Select students and assign room seats with a sitting skip rule."
   },
   {
     title: "ATKT Scheduler",
@@ -113,6 +155,52 @@ export default function ExaminationConductWizardPage() {
       title="Examination Conduct Wizard 1"
       subtitle="Run the conduct examination setup through the original live pages, embedded step by step."
       steps={steps}
+      startLabel="Start conduct setup"
+    />
+  );
+}
+
+const feesAndScholarshipSteps = [
+  ...steps.slice(0, 3),
+  {
+    title: 'Exam Fine',
+    path: '/conduct-exam-fine',
+    icon: <Paid />,
+    description: 'Configure date-range fines per day or flat, charged per course or as a flat overall amount, for Programwise Form 2.'
+  },
+  {
+    title: "Exam Fees",
+    path: "/conduct-exam-fees",
+    icon: <Paid />,
+    description: "Configure coursewise or examwise fee items used while students submit the examination form."
+  },
+  {
+    title: "Exam Max Fees",
+    path: "/conduct-exam-fees-max",
+    icon: <Paid />,
+    description: "Set maximum exam-fee caps for selected academic year, regulation, program, and exam combinations."
+  },
+  {
+    title: "Exam Scholarship",
+    path: "/exam-scholarship",
+    icon: <Rule />,
+    description: "Select students whose exam fee should become zero during preapproved form submission."
+  },
+  {
+    title: "Pre Exam Eligibility",
+    path: "/pre-exam-eligibility",
+    icon: <FactCheck />,
+    description: "Maintain barred students or courses so preapproved exam forms can skip ineligible course entries."
+  },
+  ...steps.slice(3)
+];
+
+export function ExaminationConductWizard2Page() {
+  return (
+    <EmbeddedWizardShell
+      title="Examination Conduct Wizard 2"
+      subtitle="Run the conduct examination setup with fee, maximum fee, scholarship, and pre-exam eligibility controls embedded."
+      steps={feesAndScholarshipSteps}
       startLabel="Start conduct setup"
     />
   );

@@ -62,6 +62,7 @@ const navigation = [
 const quickLinks = [
   { label: "Faculty login", to: "/Login" },
   { label: "Student login", to: "/loginstud" },
+  { label: "Lead login", to: "/lead-login" },
   { label: "Applicant entrance exam", to: "/admission-applicant-exam" },
   { label: "Vendor login", to: "/purchase-new-vendor-login" },
   { label: "Create account", to: "/signuppage" }
@@ -233,13 +234,14 @@ function CampusWebsite() {
           <Box component={RouterLink} to="/" sx={{ display: "flex", alignItems: "center", textDecoration: "none", color: "inherit", flexGrow: 1 }}>
             <Box component="img" src={logoUrl} alt="Campus Technology" sx={{ width: { xs: 150, md: 190 }, maxHeight: 52, objectFit: "contain" }} />
           </Box>
-          <Stack direction="row" spacing={1} sx={{ display: { xs: "none", md: "flex" }, alignItems: "center" }}>
+          <Stack direction="row" spacing={1} sx={{ display: { xs: "none", md: "flex" }, alignItems: "center", flexWrap: 'wrap', justifyContent: 'flex-end', rowGap: 1, py: 1, maxWidth: '78%' }}>
             {navigation.map((item) => (
               <Button key={item.label} component="a" href={item.href} sx={{ color: "#334155" }}>
                 {item.label}
               </Button>
             ))}
             <Button variant="outlined" onClick={() => navigate("/Login")}>Login</Button>
+            <Button variant="outlined" onClick={() => navigate('/lead-login')}>Lead Login</Button>
             <Button variant="outlined" onClick={() => navigate("/parent-login")}>Parent Login</Button>
             <Button variant="outlined" onClick={() => navigate("/purchase-new-vendor-login")}>Vendor Login</Button>
             <Button variant="contained" onClick={() => navigate("/signuppage")}>Create Account</Button>
@@ -445,8 +447,17 @@ function CampusWebsite() {
             </Grid>
             <Grid item xs={12} md={3}>
               <Typography sx={{ fontWeight: 900, color: "#fff", mb: 1 }}>Contact</Typography>
-              <Typography>support@campus.technology</Typography>
-              <Typography sx={{ mt: 1 }}>Copyright @ 2026 Campus Technology</Typography>
+              <Typography sx={{ fontWeight: 700, color: "#f8fafc" }}>Kahan Technologies Pvt Ltd</Typography>
+              <Typography sx={{ fontSize: 13, color: "#94a3b8", mt: 0.5 }}>
+                196 Block B, Bangur Avenue, Kolkata 700055
+              </Typography>
+              <Typography sx={{ fontSize: 13, color: "#94a3b8", mt: 0.5 }}>
+                HBR Layout, Bangalore 560043
+              </Typography>
+              <Typography sx={{ fontSize: 13, color: "#bfdbfe", mt: 1 }}>
+                Email: support@kahantechnologies.com
+              </Typography>
+              <Typography sx={{ mt: 1.5, fontSize: 13 }}>Copyright ©️ 2026 Kahan Technologies Pvt Ltd, All Rights Reserved</Typography>
             </Grid>
           </Grid>
         </Container>

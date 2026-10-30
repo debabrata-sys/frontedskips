@@ -101,7 +101,7 @@ export function PrivacyPolicyPage() {
         We may update this Privacy Policy from time to time. The updated version will be posted on this page with a revised effective date. Continued use of the services after changes means the updated policy applies.
       </Section>
       <Section title="15. Contact">
-        For privacy questions or requests, contact {companyName} through the official support channel provided by your institution or by email at support@campus.technology.
+        For privacy questions or requests, contact {companyName} through the official support channel provided by your institution or by email at support@kahantechnologies.com.
       </Section>
     </LegalLayout>
   );
@@ -156,7 +156,7 @@ export function TermsOfServicePage() {
         These terms are governed by the laws of India, unless a separate written agreement states otherwise. Courts with appropriate jurisdiction in India will handle disputes, subject to any contractual dispute resolution process.
       </Section>
       <Section title="16. Contact">
-        Questions about these terms may be sent to support@campus.technology or through the official support process provided to your institution.
+        Questions about these terms may be sent to support@kahantechnologies.com or through the official support process provided to your institution.
       </Section>
     </LegalLayout>
   );

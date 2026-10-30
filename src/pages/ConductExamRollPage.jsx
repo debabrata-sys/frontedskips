@@ -10,14 +10,18 @@ import MenuPageShell from "./MenuPageShell";
 import { addOption, embeddedAwarePath, handleAddOption, renderAddOption } from "./addableAutocompleteHelpers";
 
 const yesNo = ["Yes", "No"];
+const SELECT_ALL = { value: "__all__", label: "Select All" };
+const multiFilterKeys = new Set(["program", "programcode", "type", "papertype", "subject", "semester", "course", "coursecode"]);
 const filterFields = [
   { key: "academicyear", label: "Academic Year" },
   { key: "regulation", label: "Regulation" },
   { key: "exam", label: "Exam" },
   { key: "examcode", label: "Exam Code" },
+  { key: "batch", label: "Batch" },
   { key: "program", label: "Program" },
   { key: "programcode", label: "Program Code" },
   { key: "type", label: "Type" },
+  { key: "papertype", label: "Paper Type" },
   { key: "subject", label: "Subject" },
   { key: "semester", label: "Semester" },
   { key: "course", label: "Course" },
@@ -34,6 +38,8 @@ const filterFields = [
   { key: "examslot", label: "Exam Slot" },
   { key: "campus", label: "Campus" },
   { key: "building", label: "Building" },
+  { key: "blockno", label: "Block No" },
+  { key: "shortbarcode", label: "Short Barcode" },
   { key: "examroom", label: "Exam Room" },
   { key: "seatno", label: "Seat No" },
   { key: "examseatno", label: "Unique ID" }
@@ -43,11 +49,17 @@ const blankForm = {
   regulation: "",
   exam: "",
   examcode: "",
+  batch: "",
   program: "",
   programcode: "",
+  programs: [],
   type: "Major",
+  types: [],
+  papertype: "Theory",
   subject: "",
+  subjects: [],
   semester: "",
+  semesters: [],
   courses: [],
   student: "",
   regno: "",
@@ -65,11 +77,49 @@ const blankForm = {
   examslot: "",
   campus: "",
   building: "",
+  blockno: "",
+  shortbarcode: "",
   examroom: "",
   seatno: "",
   examseatno: ""
 };
 const uniq = (items) => [...new Set(items.filter(Boolean).map((item) => String(item).trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+const optionLabel = (item) => typeof item === "string" ? item : item?.label || "";
+
+function CheckboxMultiSelect({ label, options = [], value = [], onChange, disabled = false, getLabel = optionLabel }) {
+  const actualValue = Array.isArray(value) ? value : [];
+  const allOptions = [SELECT_ALL, ...options];
+  const selectedAll = options.length > 0 && actualValue.length === options.length;
+  return (
+    <Autocomplete
+      multiple
+      disableCloseOnSelect
+      disabled={disabled}
+      options={allOptions}
+      value={actualValue}
+      isOptionEqualToValue={(option, selected) => (
+        option?.value === SELECT_ALL.value
+          ? selected?.value === SELECT_ALL.value
+          : getLabel(option) === getLabel(selected)
+      )}
+      getOptionLabel={(option) => option?.label || getLabel(option)}
+      onChange={(_, next, __, details) => {
+        if (details?.option?.value === SELECT_ALL.value) {
+          onChange(selectedAll ? [] : options);
+          return;
+        }
+        onChange((next || []).filter((item) => item?.value !== SELECT_ALL.value));
+      }}
+      renderOption={(props, option, { selected }) => (
+        <li {...props}>
+          <Checkbox checked={option?.value === SELECT_ALL.value ? selectedAll : selected} />
+          {option?.label || getLabel(option)}
+        </li>
+      )}
+      renderInput={(params) => <TextField {...params} label={label} />}
+    />
+  );
+}
 
 export default function ConductExamRollPage() {
   const navigate = useNavigate();
@@ -79,7 +129,7 @@ export default function ConductExamRollPage() {
   const [filterRows, setFilterRows] = useState([]);
   const [form, setForm] = useState(blankForm);
   const [editId, setEditId] = useState("");
-  const [filters, setFilters] = useState(() => filterFields.reduce((acc, item) => ({ ...acc, [item.key]: "" }), {}));
+  const [filters, setFilters] = useState(() => filterFields.reduce((acc, item) => ({ ...acc, [item.key]: multiFilterKeys.has(item.key) ? [] : "" }), {}));
   const [selectedIds, setSelectedIds] = useState([]);
   const [loadingRows, setLoadingRows] = useState(false);
   const [loadingFilterRows, setLoadingFilterRows] = useState(false);
@@ -111,7 +161,13 @@ export default function ConductExamRollPage() {
       setLoadingRows(true);
       setError("");
       const params = { colid: global1.colid };
-      Object.entries(nextFilters).forEach(([key, value]) => { if (value) params[key] = value; });
+      Object.entries(nextFilters).forEach(([key, value]) => {
+        if (Array.isArray(value)) {
+          if (value.length) params[key] = value;
+          return;
+        }
+        if (value) params[key] = value;
+      });
       const res = await ep1.get("/api/v2/conductexam/examrolls", { params });
       setRows(res.data?.data || []);
       setSelectedIds([]);
@@ -136,17 +192,21 @@ export default function ConductExamRollPage() {
 
   const selectExam = (examcode) => {
     const exam = exams.find((item) => item.examcode === examcode);
-    setForm({ ...blankForm, academicyear: exam?.academicyear || "", exam: exam?.examname || "", examcode: exam?.examcode || "" });
+    setForm({ ...blankForm, academicyear: exam?.academicyear || "", exam: exam?.examname || "", examcode: exam?.examcode || "", batch: exam?.batch || "", programs: [], types: [], subjects: [], semesters: [], courses: [] });
     if (exam?.examcode) loadExamCourses({ examcode: exam.examcode });
   };
 
   const filteredExamCourses = useMemo(() => examCourses.filter((row) => {
+    const programCodes = form.programs?.length ? form.programs.map((item) => item.programcode) : (form.programcode ? [form.programcode] : []);
+    const types = form.types?.length ? form.types : (form.type ? [form.type] : []);
+    const subjects = form.subjects?.length ? form.subjects : (form.subject ? [form.subject] : []);
+    const semesters = form.semesters?.length ? form.semesters : (form.semester ? [form.semester] : []);
     if (form.examcode && row.examcode !== form.examcode) return false;
     if (form.regulation && row.regulation !== form.regulation) return false;
-    if (form.programcode && row.programcode !== form.programcode) return false;
-    if (form.type && row.type !== form.type) return false;
-    if (form.subject && row.subject !== form.subject) return false;
-    if (form.semester && row.semester !== form.semester) return false;
+    if (programCodes.length && !programCodes.includes(row.programcode)) return false;
+    if (types.length && !types.includes(row.type)) return false;
+    if (subjects.length && !subjects.includes(row.subject)) return false;
+    if (semesters.length && !semesters.includes(row.semester)) return false;
     return true;
   }), [examCourses, form]);
 
@@ -158,29 +218,29 @@ export default function ConductExamRollPage() {
     });
     return [...map.values()].sort((a, b) => a.program.localeCompare(b.program));
   }, [examCourses, form.examcode, form.regulation]);
-  const typeOptions = useMemo(() => uniq(examCourses.filter((row) => (!form.examcode || row.examcode === form.examcode) && (!form.regulation || row.regulation === form.regulation) && (!form.programcode || row.programcode === form.programcode)).map((row) => row.type)), [examCourses, form]);
-  const subjectOptions = useMemo(() => uniq(examCourses.filter((row) => (!form.examcode || row.examcode === form.examcode) && (!form.regulation || row.regulation === form.regulation) && (!form.programcode || row.programcode === form.programcode) && (!form.type || row.type === form.type)).map((row) => row.subject)), [examCourses, form]);
-  const semesterOptions = useMemo(() => uniq(examCourses.filter((row) => (!form.examcode || row.examcode === form.examcode) && (!form.regulation || row.regulation === form.regulation) && (!form.programcode || row.programcode === form.programcode) && (!form.type || row.type === form.type) && (!form.subject || row.subject === form.subject)).map((row) => row.semester)), [examCourses, form]);
+  const selectedProgramCodes = useMemo(() => form.programs?.length ? form.programs.map((item) => item.programcode) : (form.programcode ? [form.programcode] : []), [form.programs, form.programcode]);
+  const typeOptions = useMemo(() => uniq(examCourses.filter((row) => (!form.examcode || row.examcode === form.examcode) && (!form.regulation || row.regulation === form.regulation) && (!selectedProgramCodes.length || selectedProgramCodes.includes(row.programcode))).map((row) => row.type)), [examCourses, form.examcode, form.regulation, selectedProgramCodes]);
+  const subjectOptions = useMemo(() => uniq(examCourses.filter((row) => (!form.examcode || row.examcode === form.examcode) && (!form.regulation || row.regulation === form.regulation) && (!selectedProgramCodes.length || selectedProgramCodes.includes(row.programcode)) && (!form.types?.length || form.types.includes(row.type))).map((row) => row.subject)), [examCourses, form.examcode, form.regulation, selectedProgramCodes, form.types]);
+  const semesterOptions = useMemo(() => uniq(examCourses.filter((row) => (!form.examcode || row.examcode === form.examcode) && (!form.regulation || row.regulation === form.regulation) && (!selectedProgramCodes.length || selectedProgramCodes.includes(row.programcode)) && (!form.types?.length || form.types.includes(row.type)) && (!form.subjects?.length || form.subjects.includes(row.subject))).map((row) => row.semester)), [examCourses, form.examcode, form.regulation, selectedProgramCodes, form.types, form.subjects]);
   const courseOptions = useMemo(() => {
     const map = new Map();
     filteredExamCourses.forEach((row) => {
-      if (row.coursecode) map.set(row.coursecode, { course: row.course, coursecode: row.coursecode, examdate: row.examdate || "", examslot: row.examslot || "" });
+      if (row.coursecode) map.set(`${row.programcode}||${row.type}||${row.subject}||${row.semester}||${row.coursecode}`, { ...row, examdate: row.examdate || "", examslot: row.examslot || "" });
     });
     return [...map.values()].sort((a, b) => a.course.localeCompare(b.course));
   }, [filteredExamCourses]);
 
   const selectRegulation = (regulation) => {
-    setForm((prev) => ({ ...prev, regulation, program: "", programcode: "", type: "", subject: "", semester: "", courses: [] }));
+    setForm((prev) => ({ ...prev, regulation, program: "", programcode: "", programs: [], type: "", types: [], subject: "", subjects: [], semester: "", semesters: [], courses: [] }));
   };
 
-  const selectProgram = (programcode) => {
-    const selected = programOptions.find((item) => item.programcode === programcode);
-    setForm((prev) => ({ ...prev, programcode, program: selected?.program || "", type: "", subject: "", semester: "", courses: [] }));
+  const selectPrograms = (programs) => {
+    setForm((prev) => ({ ...prev, programs, programcode: programs[0]?.programcode || "", program: programs[0]?.program || "", type: "", types: [], subject: "", subjects: [], semester: "", semesters: [], courses: [] }));
   };
 
   const generateRoll = async () => {
     if (generating) return;
-    if (!form.examcode || !form.regulation || !form.programcode || !form.type || !form.subject || !form.semester || !form.courses.length) {
+    if (!form.examcode || !form.regulation || !form.programs?.length || !form.types?.length || !form.subjects?.length || !form.semesters?.length || !form.courses.length) {
       setError("Select exam, regulation, program, type, subject, semester and at least one course.");
       return;
     }
@@ -191,7 +251,7 @@ export default function ConductExamRollPage() {
       const res = await ep1.post("/api/v2/conductexam/examrolls-generate", { ...form, colid: global1.colid, user: global1.user });
       setMessage(`${res.data?.saved || 0} roll entries created for ${res.data?.studentCount || 0} students.`);
       await Promise.all([
-        loadRows({ ...filters, examcode: form.examcode, regulation: form.regulation, programcode: form.programcode, type: form.type, subject: form.subject, semester: form.semester }),
+        loadRows({ ...filters, examcode: form.examcode, regulation: form.regulation, programcode: form.programs.map((item) => item.programcode), type: form.types, subject: form.subjects, semester: form.semesters }),
         loadFilterRows()
       ]);
     } catch (err) {
@@ -216,7 +276,15 @@ export default function ConductExamRollPage() {
 
   const editRow = (row) => {
     setEditId(row._id);
-    setForm({ ...blankForm, ...row, courses: [{ course: row.course, coursecode: row.coursecode }] });
+    setForm({
+      ...blankForm,
+      ...row,
+      programs: [{ program: row.program, programcode: row.programcode }],
+      types: row.type ? [row.type] : [],
+      subjects: row.subject ? [row.subject] : [],
+      semesters: row.semester ? [row.semester] : [],
+      courses: [{ ...row, course: row.course, coursecode: row.coursecode }]
+    });
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
@@ -270,7 +338,7 @@ export default function ConductExamRollPage() {
   };
 
   const downloadTemplate = () => {
-    const worksheet = XLSX.utils.json_to_sheet([{ academicyear: "2026-27", regulation: "NEP 2026", exam: "Semester End Examination", examcode: "SEE-2026-ODD", program: "B.Com", programcode: "BCOM", type: "Major", subject: "Accountancy", semester: "1", course: "Financial Accounting", coursecode: "BCOM-MAJ-101", student: "Student Name", regno: "REG001", email: "student@example.com", phone: "9999999999", section: "A", examsection: "Section-A, Section-B, Pr", applied: "Yes", admitcardeligible: "Yes", attended: "No", noofbacklogs: 0, atkt: "", remarks: "", examdate: "2026-12-10", examslot: "10:00 AM - 1:00 PM", campus: "Main Campus", building: "Academic Block", examroom: "", seatno: "", examseatno: "" }]);
+    const worksheet = XLSX.utils.json_to_sheet([{ academicyear: "2026-27", regulation: "NEP 2026", exam: "Semester End Examination", examcode: "SEE-2026-ODD", batch: "SUMMER 25-26-YR(REGULAR)", program: "B.Com", programcode: "BCOM", type: "Major", papertype: "Theory", subject: "Accountancy", semester: "1", course: "Financial Accounting", coursecode: "BCOM-MAJ-101", student: "Student Name", regno: "REG001", email: "student@example.com", phone: "9999999999", section: "A", examsection: "Section-A, Section-B, Pr", applied: "Yes", admitcardeligible: "Yes", attended: "No", noofbacklogs: 0, atkt: "", remarks: "", examdate: "2026-12-10", examslot: "10:00 AM - 1:00 PM", campus: "Main Campus", building: "Academic Block", blockno: "1", shortbarcode: "12345", examroom: "", seatno: "", examseatno: "" }]);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Exam Roll");
     XLSX.writeFile(workbook, "conduct_exam_roll_template.xlsx");
@@ -309,7 +377,7 @@ export default function ConductExamRollPage() {
   const isPageBusy = loadingRows || loadingFilterRows || generating || bulkUploading || bulkDeleting;
 
   const clearFilters = () => {
-    const nextFilters = filterFields.reduce((acc, item) => ({ ...acc, [item.key]: "" }), {});
+    const nextFilters = filterFields.reduce((acc, item) => ({ ...acc, [item.key]: multiFilterKeys.has(item.key) ? [] : "" }), {});
     setFilters(nextFilters);
     loadRows(nextFilters);
   };
@@ -320,8 +388,10 @@ export default function ConductExamRollPage() {
     { field: "regulation", headerName: "Regulation", width: 140 },
     { field: "exam", headerName: "Exam", minWidth: 170, flex: 1 },
     { field: "examcode", headerName: "Exam Code", width: 140 },
+    { field: "batch", headerName: "Batch", width: 170 },
     { field: "programcode", headerName: "Program", width: 120 },
     { field: "type", headerName: "Type", width: 100 },
+    { field: "papertype", headerName: "Paper Type", width: 120 },
     { field: "subject", headerName: "Subject", minWidth: 140, flex: 1 },
     { field: "semester", headerName: "Sem", width: 80 },
     { field: "course", headerName: "Course", minWidth: 170, flex: 1 },
@@ -340,6 +410,8 @@ export default function ConductExamRollPage() {
     { field: "examslot", headerName: "Exam Slot", width: 170 },
     { field: "campus", headerName: "Campus", width: 140 },
     { field: "building", headerName: "Building", width: 150 },
+    { field: "blockno", headerName: "Block No", width: 110 },
+    { field: "shortbarcode", headerName: "Short Barcode", width: 140 },
     { field: "examroom", headerName: "Exam Room", width: 130 },
     { field: "seatno", headerName: "Seat No", width: 110 },
     { field: "actions", headerName: "Actions", width: 170, sortable: false, renderCell: (params) => <Stack direction="row" spacing={1}><Button size="small" onClick={() => editRow(params.row)}>Edit</Button><Button size="small" color="error" onClick={() => deleteRow(params.row._id)}>Delete</Button></Stack> }
@@ -374,22 +446,66 @@ export default function ConductExamRollPage() {
         <Grid container spacing={2}>
           <Grid item xs={12} md={3}><TextField select fullWidth label="Exam" value={form.examcode} onChange={(e) => e.target.value === "__add_exam" ? navigate(embeddedAwarePath("/conduct-exam-master")) : selectExam(e.target.value)}><MenuItem value="__add_exam" sx={{ fontWeight: 800, color: "#2563eb" }}>+ Add Exam</MenuItem>{exams.map((item) => <MenuItem key={item._id} value={item.examcode}>{item.academicyear} - {item.examname} ({item.examcode})</MenuItem>)}</TextField></Grid>
           <Grid item xs={12} md={1.5}><TextField fullWidth label="Academic Year" value={form.academicyear} InputProps={{ readOnly: true }} /></Grid>
+          <Grid item xs={12} md={2}><TextField fullWidth label="Batch" value={form.batch || ""} onChange={(e) => setForm({ ...form, batch: e.target.value })} /></Grid>
           <Grid item xs={12} md={2}><TextField select fullWidth label="Regulation" value={form.regulation} onChange={(e) => e.target.value === "__add_regulation" ? navigate(embeddedAwarePath("/regulationmaster")) : selectRegulation(e.target.value)} disabled={!form.examcode}><MenuItem value="__add_regulation" sx={{ fontWeight: 800, color: "#2563eb" }}>+ Add Regulation</MenuItem>{regulationOptions.map((item) => <MenuItem key={item} value={item}>{item}</MenuItem>)}</TextField></Grid>
-          <Grid item xs={12} md={3}><TextField select fullWidth label="Program" value={form.programcode} onChange={(e) => e.target.value === "__add_program" ? navigate(embeddedAwarePath("/programmanagement")) : selectProgram(e.target.value)} disabled={!form.regulation}><MenuItem value="__add_program" sx={{ fontWeight: 800, color: "#2563eb" }}>+ Add Program</MenuItem>{programOptions.map((item) => <MenuItem key={item.programcode} value={item.programcode}>{item.program} ({item.programcode})</MenuItem>)}</TextField></Grid>
-          <Grid item xs={12} md={1.5}><TextField select fullWidth label="Type" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value, subject: "", semester: "", courses: [] })} disabled={!form.programcode}>{typeOptions.map((item) => <MenuItem key={item} value={item}>{item}</MenuItem>)}</TextField></Grid>
-          <Grid item xs={12} md={2}><TextField select fullWidth label="Subject" value={form.subject} onChange={(e) => e.target.value === "__add_course_map" ? navigate(embeddedAwarePath("/regulationcoursemap")) : setForm({ ...form, subject: e.target.value, semester: "", courses: [] })} disabled={!form.programcode}><MenuItem value="__add_course_map" sx={{ fontWeight: 800, color: "#2563eb" }}>+ Add Regulation Course Map</MenuItem>{subjectOptions.map((item) => <MenuItem key={item} value={item}>{item}</MenuItem>)}</TextField></Grid>
-          <Grid item xs={12} md={1.5}><TextField select fullWidth label="Semester" value={form.semester} onChange={(e) => e.target.value === "__add_course_map" ? navigate(embeddedAwarePath("/regulationcoursemap")) : setForm({ ...form, semester: e.target.value, courses: [] })} disabled={!form.subject}><MenuItem value="__add_course_map" sx={{ fontWeight: 800, color: "#2563eb" }}>+ Add Regulation Course Map</MenuItem>{semesterOptions.map((item) => <MenuItem key={item} value={item}>{item}</MenuItem>)}</TextField></Grid>
+          <Grid item xs={12} md={3}>
+            <CheckboxMultiSelect
+              label="Program"
+              options={programOptions}
+              value={form.programs || []}
+              onChange={selectPrograms}
+              getLabel={(item) => `${item.program} (${item.programcode})`}
+              disabled={!form.regulation}
+            />
+          </Grid>
+          <Grid item xs={12} md={2}>
+            <CheckboxMultiSelect
+              label="Type"
+              options={typeOptions}
+              value={form.types || []}
+              onChange={(value) => setForm({ ...form, types: value, type: value[0] || "", subjects: [], subject: "", semesters: [], semester: "", courses: [] })}
+              disabled={!form.programs?.length}
+            />
+          </Grid>
+          <Grid item xs={12} md={1.5}><TextField select fullWidth label="Paper Type" value={form.papertype || ""} onChange={(e) => setForm({ ...form, papertype: e.target.value })}><MenuItem value="">Blank</MenuItem>{["Theory", "Practical", "Viva"].map((item) => <MenuItem key={item} value={item}>{item}</MenuItem>)}</TextField></Grid>
+          <Grid item xs={12} md={2}>
+            <CheckboxMultiSelect
+              label="Subject"
+              options={subjectOptions}
+              value={form.subjects || []}
+              onChange={(value) => setForm({ ...form, subjects: value, subject: value[0] || "", semesters: [], semester: "", courses: [] })}
+              disabled={!form.types?.length}
+            />
+          </Grid>
+          <Grid item xs={12} md={1.5}>
+            <CheckboxMultiSelect
+              label="Semester"
+              options={semesterOptions}
+              value={form.semesters || []}
+              onChange={(value) => setForm({ ...form, semesters: value, semester: value[0] || "", courses: [] })}
+              disabled={!form.subjects?.length}
+            />
+          </Grid>
           <Grid item xs={12} md={1.5}><Button fullWidth variant="contained" onClick={generateRoll} disabled={generating} sx={{ height: 56 }}>{generating ? "Generating..." : "Generate"}</Button></Grid>
           <Grid item xs={12}>
             <Autocomplete
               multiple
               disableCloseOnSelect
-              options={[addOption("+ Add Exam Courses", "/conduct-exam-courses"), ...courseOptions]}
+              options={[addOption("+ Add Exam Courses", "/conduct-exam-courses"), SELECT_ALL, ...courseOptions]}
               value={form.courses}
-              isOptionEqualToValue={(option, value) => option?._id === value?._id || option?.coursecode === value?.coursecode}
-              getOptionLabel={(option) => option?.__addOption ? option.label : `${option.course} (${option.coursecode})${option.examdate ? ` - ${option.examdate}` : ""}${option.examslot ? ` - ${option.examslot}` : ""}`}
-              onChange={(event, value) => { const add = (value || []).find((item) => item?.__addOption); if (add && handleAddOption(add, navigate)) return; setForm({ ...form, courses: value.filter((item) => !item?.__addOption) }); }}
-              renderOption={(props, option, { selected }) => option?.__addOption ? renderAddOption(props, option) : <li {...props}><Checkbox checked={selected} />{option.course} ({option.coursecode}){option.examdate ? ` - ${option.examdate}` : ""}{option.examslot ? ` - ${option.examslot}` : ""}</li>}
+              isOptionEqualToValue={(option, value) => option?._id === value?._id || `${option?.programcode}||${option?.type}||${option?.subject}||${option?.semester}||${option?.coursecode}` === `${value?.programcode}||${value?.type}||${value?.subject}||${value?.semester}||${value?.coursecode}`}
+              getOptionLabel={(option) => option?.__addOption ? option.label : `${option.programcode || ""} | ${option.type || ""} | Sem ${option.semester || ""} | ${option.course} (${option.coursecode})${option.examdate ? ` - ${option.examdate}` : ""}${option.examslot ? ` - ${option.examslot}` : ""}`}
+              onChange={(event, value, reason, details) => {
+                const add = (value || []).find((item) => item?.__addOption);
+                if (add && handleAddOption(add, navigate)) return;
+                if (details?.option?.value === SELECT_ALL.value) {
+                  const selectedAll = courseOptions.length > 0 && form.courses.length === courseOptions.length;
+                  setForm({ ...form, courses: selectedAll ? [] : courseOptions });
+                  return;
+                }
+                setForm({ ...form, courses: value.filter((item) => !item?.__addOption && item?.value !== SELECT_ALL.value) });
+              }}
+              renderOption={(props, option, { selected }) => option?.__addOption ? renderAddOption(props, option) : <li {...props}><Checkbox checked={option.value === SELECT_ALL.value ? courseOptions.length > 0 && form.courses.length === courseOptions.length : selected} />{option.label || `${option.programcode || ""} | ${option.type || ""} | Sem ${option.semester || ""} | ${option.course} (${option.coursecode})${option.examdate ? ` - ${option.examdate}` : ""}${option.examslot ? ` - ${option.examslot}` : ""}`}</li>}
               renderInput={(params) => <TextField {...params} label="Courses" />}
             />
           </Grid>
@@ -404,6 +520,8 @@ export default function ConductExamRollPage() {
               <Grid item xs={12} md={2}><TextField fullWidth label="Exam Slot" value={form.examslot || ""} onChange={(e) => setForm({ ...form, examslot: e.target.value })} /></Grid>
               <Grid item xs={12} md={2}><TextField fullWidth label="Campus" value={form.campus || ""} onChange={(e) => setForm({ ...form, campus: e.target.value })} /></Grid>
               <Grid item xs={12} md={2}><TextField fullWidth label="Building" value={form.building || ""} onChange={(e) => setForm({ ...form, building: e.target.value })} /></Grid>
+              <Grid item xs={12} md={2}><TextField fullWidth label="Block No" value={form.blockno || ""} onChange={(e) => setForm({ ...form, blockno: e.target.value })} /></Grid>
+              <Grid item xs={12} md={2}><TextField fullWidth label="Short Barcode" value={form.shortbarcode || ""} onChange={(e) => setForm({ ...form, shortbarcode: e.target.value })} /></Grid>
               <Grid item xs={12} md={2}><TextField fullWidth label="Exam Room" value={form.examroom} onChange={(e) => setForm({ ...form, examroom: e.target.value })} /></Grid>
               <Grid item xs={12} md={2}><TextField fullWidth label="Seat No" value={form.seatno} onChange={(e) => setForm({ ...form, seatno: e.target.value })} /></Grid>
               <Grid item xs={12} md={2}><TextField fullWidth label="Exam Section" placeholder="Section-A, Section-B, Pr" value={form.examsection || ""} onChange={(e) => setForm({ ...form, examsection: e.target.value })} /></Grid>
@@ -425,16 +543,25 @@ export default function ConductExamRollPage() {
         <Grid container spacing={2}>
           {filterFields.map(({ key, label }) => (
             <Grid item xs={12} sm={6} md={2} key={key}>
-              <TextField
-                select
-                fullWidth
-                label={label}
-                value={filters[key] || ""}
-                onChange={(e) => setFilters({ ...filters, [key]: e.target.value })}
-              >
-                <MenuItem value="">All</MenuItem>
-                {(filterOptions[key] || []).map((item) => <MenuItem key={item} value={item}>{item}</MenuItem>)}
-              </TextField>
+              {multiFilterKeys.has(key) ? (
+                <CheckboxMultiSelect
+                  label={label}
+                  options={filterOptions[key] || []}
+                  value={Array.isArray(filters[key]) ? filters[key] : []}
+                  onChange={(value) => setFilters({ ...filters, [key]: value })}
+                />
+              ) : (
+                <TextField
+                  select
+                  fullWidth
+                  label={label}
+                  value={filters[key] || ""}
+                  onChange={(e) => setFilters({ ...filters, [key]: e.target.value })}
+                >
+                  <MenuItem value="">All</MenuItem>
+                  {(filterOptions[key] || []).map((item) => <MenuItem key={item} value={item}>{item}</MenuItem>)}
+                </TextField>
+              )}
             </Grid>
           ))}
           <Grid item xs={12} md={2}><Button fullWidth variant="outlined" onClick={() => loadRows()} disabled={loadingRows} sx={{ height: 56 }}>{loadingRows ? "Loading..." : "Filter"}</Button></Grid>

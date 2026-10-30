@@ -5,6 +5,7 @@ import {
   Box,
   Button,
   Checkbox,
+  CircularProgress,
   Chip,
   Grid,
   ListItemText,
@@ -21,8 +22,22 @@ import { DataGrid, GridToolbar } from "@mui/x-data-grid";
 import { Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import ep1 from "../api/ep1";
 import global1 from "./global1";
+import MenuPageShell from "./MenuPageShell";
 import PlacementCoordinatorShell from "./PlacementCoordinatorShell";
 import { openPurchase2PrintWindow } from "./Purchase2PrintTemplates";
+import { calculatePoLine, summarizePo } from "../utils/purchase2Amounts";
+import Purchase2PoAmountsEditor from "./Purchase2PoAmountsEditor";
+import Purchase2PoWorkbench from './Purchase2PoWorkbench';
+import { resolvePoDelivery } from '../utils/purchase2Delivery';
+
+function PoActionButton({ onClick, disabled, startIcon, children, ...props }) {
+  const [busy, setBusy] = useState(false);
+  return <Button {...props} disabled={disabled || busy} aria-busy={busy} startIcon={busy ? <CircularProgress size={16} color="inherit" /> : startIcon} onClick={async event => {
+    if (busy) return;
+    setBusy(true);
+    try { await onClick?.(event); } finally { setBusy(false); }
+  }}>{children}</Button>;
+}
 
 const today = () => new Date().toISOString().slice(0, 10);
 const nowTime = () => new Date().toTimeString().slice(0, 5);
@@ -50,12 +65,6 @@ const loadUsers = async () => {
   const res = await ep1.get("/api/v2/hrattendance/options", { params: { colid: global1.colid } });
   return res.data?.users || [];
 };
-const calcLineTotal = (item) => {
-  const amount = num(item.price || item.estimatedprice) * num(item.quantity);
-  const gstAmount = amount * (num(item.gst) / 100);
-  const discount = num(item.discount);
-  return Number((amount + gstAmount - discount).toFixed(2));
-};
 const multiSelectProps = (selected = []) => ({
   multiple: true,
   renderValue: (values) => values.join(", ")
@@ -77,7 +86,16 @@ const loadPrintInstitution = async () => {
 };
 const printPurchase2 = async (type, data) => {
   const institution = await loadPrintInstitution();
-  openPurchase2PrintWindow(type, { ...(data || {}), institution });
+  let header = data?.header || {};
+  if (['po','localPo'].includes(type)) {
+    if (!header.storeid && header.prnumber) {
+      const pr = (await getRows('storeprrequestds2', [{ field: 'prnumber', value: header.prnumber }])).find(row => row.prnumber === header.prnumber);
+      if (pr) header = { ...header, storeid: pr.storeid, storename: header.storename || pr.storename };
+    }
+    const stores = await getRows('storemasterds2');
+    header = { ...header, ...resolvePoDelivery(header, stores) };
+  }
+  openPurchase2PrintWindow(type, { ...(data || {}), header, institution });
 };
 const uniqueOptions = (rows = [], field) => [...new Set(rows.map((row) => text(row[field])).filter(Boolean))].sort((a, b) => a.localeCompare(b));
 const inDateRange = (value, start, end) => {
@@ -159,6 +177,26 @@ const saveRow = async (model, payload) => {
   return res.data?.data;
 };
 const updateRow = async (model, row, patch) => saveRow(model, { ...row, id: row._id, ...patch });
+const getPrAvailability = async prnumber => {
+  const response = await ep1.get('/api/v2/purchase2/pr-availability', { params: { colid: global1.colid, ...(prnumber ? { prnumber } : {}) } });
+  return response.data.data || [];
+};
+export const pendingPoAssignments = (assignments, states) => {
+  const byPr = new Map(states.map(state => [state.prnumber, state]));
+  return assignments.filter(row => {
+    const state = byPr.get(row.prnumber);
+    return state && state.allowed !== false && !state.complete && state.remaining.length > 0 && !['hold','reject','rejected'].includes(text(row.status).toLowerCase());
+  }).map(row => ({ ...row, pocomplete: false, status: byPr.get(row.prnumber).ordered > 0 ? 'Partially PO Generated' : ['PO Created','PO Generated','Completed'].includes(row.status) ? 'Assigned' : row.status }));
+};
+const remainingPrItems = async assignment => {
+  const state = (await getPrAvailability(assignment.prnumber))[0];
+  if (!state || !state.allowed || state.complete || !state.remaining.length) throw new Error('This PR is completed or unavailable. No further PO can be created');
+  return state.remaining.map(row => ({ ...row, quantity: row.remainingquantity }));
+};
+const createPrPo = async (assignment, header, items) => {
+  const response = await ep1.post('/api/v2/purchase2/po-from-pr', { ...base(), prnumber: assignment.prnumber, assignmentid: assignment._id, header, items }, { headers: { Authorization: `Bearer ${global1.token}` } });
+  return response.data.data;
+};
 const itemSearchText = (option = {}) => [
   option.itemname,
   option.item,
@@ -321,7 +359,7 @@ function Page({ title, subtitle, children, message, error }) {
   );
 }
 
-function ItemsEditor({ items, setItems, showMake = false, showPrice = false, showUnit = false, disabled = false }) {
+function ItemsEditor({ items, setItems, showMake = false, showPrice = false, showUnit = false, disabled = false, financial = false }) {
   const [item, setItem] = useState(null);
   const [qty, setQty] = useState(1);
   const [make, setMake] = useState("");
@@ -370,7 +408,7 @@ function ItemsEditor({ items, setItems, showMake = false, showPrice = false, sho
         {showPrice && <Grid item xs={12} md={2}><TextField size="small" type="number" label="Estimated price" value={estimatedprice} onChange={(e) => setEstimatedprice(e.target.value)} fullWidth /></Grid>}
         <Grid item xs={12} md={2}><Button startIcon={<Add />} variant="contained" onClick={add} disabled={disabled}>Add item</Button></Grid>
       </Grid>
-      <DataGrid sx={{ mt: 2 }} autoHeight density="compact" rows={items.map((row, index) => ({ ...row, id: index }))} columns={[
+      {financial ? <Purchase2PoAmountsEditor items={items} setItems={setItems} disabled={disabled} allowRemove /> : <DataGrid sx={{ mt: 2 }} autoHeight density="compact" rows={items.map((row, index) => ({ ...row, id: index }))} columns={[
         { field: "itemcode", headerName: "Code", width: 130 },
         { field: "itemname", headerName: "Item", flex: 1, minWidth: 180 },
         { field: "category", headerName: "Category", width: 140 },
@@ -380,7 +418,7 @@ function ItemsEditor({ items, setItems, showMake = false, showPrice = false, sho
         { field: "estimatedprice", headerName: "Est. price", width: 120, type: "number" },
         { field: "remarks", headerName: "Remarks", flex: 1, minWidth: 180, editable: !disabled },
         { field: "actions", headerName: "Action", width: 110, renderCell: (params) => <Button color="error" size="small" disabled={disabled} onClick={() => setItems(items.filter((_, idx) => idx !== params.row.id))}>Remove</Button> }
-      ]} processRowUpdate={(row) => { setItems(items.map((it, idx) => idx === row.id ? { ...it, remarks: row.remarks || "" } : it)); return row; }} />
+      ]} processRowUpdate={(row) => { setItems(items.map((it, idx) => idx === row.id ? { ...it, remarks: row.remarks || "" } : it)); return row; }} />}
     </Paper>
   );
 }
@@ -1159,9 +1197,6 @@ export function Purchase2LocalPoPage() {
   const [vendor, setVendor] = useState(null);
   const [store, setStore] = useState(null);
   const [make, setMake] = useState("");
-  const [amount, setAmount] = useState("");
-  const [gst, setGst] = useState("");
-  const [discount, setDiscount] = useState("");
   const [terms, setTerms] = useState("");
   const [remarks, setRemarks] = useState("");
   const [items, setItems] = useState([]);
@@ -1181,25 +1216,23 @@ export function Purchase2LocalPoPage() {
       const poid = key("PO");
       const priced = await Promise.all(items.map(async (item) => {
         const rates = await getRows("vendoritemsds2", [{ field: "vendorid", value: vendor._id }, { field: "itemid", value: item.itemid }]);
-        const rate = rates[0]?.price || item.estimatedprice || 0;
+        const rate = item.price ?? item.estimatedprice ?? rates[0]?.price ?? 0;
         const detail = rates[0] || {};
-        return { ...item, make: item.make || make, price: rate, gst: detail.gst || item.gst || 0, discount: detail.discount || 0, terms: detail.terms || "", warranty: detail.warranty || "", total: calcLineTotal({ ...item, price: rate, gst: detail.gst, discount: detail.discount }) };
+        return calculatePoLine({ ...item, make: item.make || make, price: rate, gst: item.gst ?? detail.gst ?? 0, discount: item.discount ?? detail.discount ?? 0, terms: detail.terms || "", warranty: detail.warranty || "" }, true);
       }));
-      const itemTotal = priced.reduce((sum, item) => sum + num(item.total), 0);
-      const baseAmount = amount === "" ? itemTotal : num(amount);
-      const gstAmount = baseAmount * (num(gst) / 100);
-      const total = Number((baseAmount + gstAmount - num(discount)).toFixed(2));
+      const totals = summarizePo(priced, true);
+      const total = totals.grandtotal;
       const signature = await getUserSignature();
       const storeName = store.storename || store.store || store.name || "";
       const storeId = store._id || store.storeid || "";
-      const header = await saveRow("storepoorderds2", { poid, year: "2026-27", vendor: vendor.vendorname, vendorid: vendor._id, storeid: storeId, storename: storeName, store: storeName, price: baseAmount, amount: baseAmount, gst: num(gst), discount: num(discount), netprice: total, actualAmount: total, poType: "Local", postatus: "Draft", approvalStatus: "Draft", deliveryType: "Physical Delivery", terms, remarks, creatorName: currentName(), creatorEmail: currentUser(), creatorSignature: signature.signaturelink || "", description: "Local PO", createdtime: nowTime() });
-      await Promise.all(priced.map((item) => saveRow("storepoitemsds2", { ...item, poid, vendor: vendor.vendorname, vendorid: vendor._id, storeid: storeId, storename: storeName, postatus: "Draft" })));
+      const header = await saveRow("storepoorderds2", { poid, year: "2026-27", vendor: vendor.vendorname, vendorid: vendor._id, storeid: storeId, storename: storeName, store: storeName, ...totals, poType: "Local", postatus: "Draft", approvalStatus: "Draft", deliveryType: "Physical Delivery", terms, remarks, creatorName: currentName(), creatorEmail: currentUser(), creatorSignature: signature.signaturelink || "", description: "Local PO", createdtime: nowTime() });
+      const savedItems = await Promise.all(priced.map((item) => saveRow("storepoitemsds2", { ...item, poid, vendor: vendor.vendorname, vendorid: vendor._id, storeid: storeId, storename: storeName, postatus: "Draft" })));
       sendPurchase2Notification("PO Generated", { poid, amount: total, status: "Draft" });
       setMessage("Local PO created as draft");
-      setPrintData({ header: { ...vendor, ...header, store: storeName, storename: storeName, terms, remarks }, items: priced });
+      setPrintData({ header: { ...vendor, ...header, ...totals, store: storeName, storename: storeName, terms, remarks }, items: savedItems });
     } catch (err) { setError(err.message); }
   };
-  return <Page title="Local PO Creation" subtitle="Create local purchase orders directly from item master and one selected vendor." message={message} error={error || basicsError}><Paper sx={{ p: 2, mb: 2 }}><Grid container spacing={2}><Grid item xs={12} md={4}><Autocomplete options={vendors} getOptionLabel={(o) => o.vendorname || o.name || ""} value={vendor} onChange={(_, v) => setVendor(v)} renderInput={(params) => <TextField {...params} label="Vendor" size="small" />} /></Grid><Grid item xs={12} md={4}><Autocomplete options={stores} getOptionLabel={(o) => o.storename || o.store || o.name || ""} value={store} onChange={(_, v) => setStore(v)} renderInput={(params) => <TextField {...params} label="Assigned store" size="small" />} /></Grid><Grid item xs={12} md={4}><TextField size="small" label="Make" value={make} onChange={(e) => setMake(e.target.value)} fullWidth /></Grid><Grid item xs={12} md={3}><TextField size="small" type="number" label="Amount" value={amount} onChange={(e) => setAmount(e.target.value)} fullWidth /></Grid><Grid item xs={12} md={3}><TextField size="small" type="number" label="GST %" value={gst} onChange={(e) => setGst(e.target.value)} fullWidth /></Grid><Grid item xs={12} md={3}><TextField size="small" type="number" label="Discount amount" value={discount} onChange={(e) => setDiscount(e.target.value)} fullWidth /></Grid><Grid item xs={12} md={3}><TextField size="small" label="Remarks" value={remarks} onChange={(e) => setRemarks(e.target.value)} fullWidth /></Grid><Grid item xs={12}><TextField size="small" label="Terms and conditions" value={terms} onChange={(e) => setTerms(e.target.value)} multiline minRows={4} fullWidth /></Grid><Grid item xs={12}><Stack direction="row" spacing={1} flexWrap="wrap"><Button variant="contained" onClick={createPo}>Create PO Draft</Button><Button startIcon={<Print />} variant="outlined" disabled={!printData} onClick={() => printPurchase2("localPo", printData)}>Print local PO</Button></Stack></Grid></Grid></Paper><ItemsEditor items={items} setItems={setItems} showMake showPrice showUnit /></Page>;
+  return <Page title="Local PO Creation" subtitle="Create local purchase orders directly from item master and one selected vendor." message={message} error={error || basicsError}><Paper sx={{ p: 2, mb: 2 }}><Grid container spacing={2}><Grid item xs={12} md={4}><Autocomplete options={vendors} getOptionLabel={(o) => o.vendorname || o.name || ""} value={vendor} onChange={(_, v) => setVendor(v)} renderInput={(params) => <TextField {...params} label="Vendor" size="small" />} /></Grid><Grid item xs={12} md={4}><Autocomplete options={stores} getOptionLabel={(o) => o.storename || o.store || o.name || ""} value={store} onChange={(_, v) => setStore(v)} renderInput={(params) => <TextField {...params} label="Assigned store" size="small" />} /></Grid><Grid item xs={12} md={4}><TextField size="small" label="Make" value={make} onChange={(e) => setMake(e.target.value)} fullWidth /></Grid><Grid item xs={12} md={3}><TextField size="small" label="Remarks" value={remarks} onChange={(e) => setRemarks(e.target.value)} fullWidth /></Grid><Grid item xs={12}><TextField size="small" label="Terms and conditions" value={terms} onChange={(e) => setTerms(e.target.value)} multiline minRows={4} fullWidth /></Grid><Grid item xs={12}><Stack direction="row" spacing={1} flexWrap="wrap"><PoActionButton variant="contained" onClick={createPo}>Create PO Draft</PoActionButton><PoActionButton startIcon={<Print />} variant="outlined" disabled={!printData} onClick={() => printPurchase2("localPo", printData)}>Print local PO</PoActionButton></Stack></Grid></Grid></Paper><ItemsEditor items={items} setItems={setItems} financial showMake showPrice showUnit /></Page>;
 }
 
 export function Purchase2StoreItemUserPage() {
@@ -1296,10 +1329,10 @@ function Purchase2ManagePoPage({ admin = false }) {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const load = async () => {
-    const [prRows, assRows, poRows] = await Promise.all([getRows("storeprrequestds2"), getRows("storepoassignmentds2"), getRows("storepoorderds2")]);
+    const [prRows, assRows, poRows, states] = await Promise.all([getRows("storeprrequestds2"), getRows("storepoassignmentds2"), getRows("storepoorderds2"), getPrAvailability()]);
     const email = text(currentUser()).toLowerCase();
     setPrs(prRows);
-    setAssignments(admin ? assRows : assRows.filter((row) => sameEmail(row.assignedtoemail, email)));
+    setAssignments(pendingPoAssignments(admin ? assRows : assRows.filter((row) => sameEmail(row.assignedtoemail, email)), states));
     setPos(admin ? poRows : poRows.filter((row) => sameEmail(row.creatorEmail || row.user, email)));
   };
   useEffect(() => { load(); }, [admin]);
@@ -1310,25 +1343,22 @@ function Purchase2ManagePoPage({ admin = false }) {
   }, [admin]);
   const createPoFromAssignment = async (assignment) => {
     try {
-      const items = await getRows("storeprrequestitemsds2", [{ field: "prnumber", value: assignment.prnumber }]);
+      const items = await remainingPrItems(assignment);
       if (!items.length) throw new Error("No PR items found");
       const [vendors, vendorItems] = await Promise.all([getRows("vendorsds2"), getRows("vendoritemsds2")]);
       const matchingVendor = vendors.find((vendor) => items.every((item) => vendorItems.some((vi) => text(vi.vendorid) === text(vendor._id) && (text(vi.itemid) === text(item.itemid) || text(vi.item).toLowerCase() === text(item.itemname).toLowerCase()))));
       if (!matchingVendor) throw new Error("No single vendor found for all PR items in vendor item master");
-      const poid = key("PO");
       const priced = items.map((item) => {
         const vi = vendorItems.find((row) => text(row.vendorid) === text(matchingVendor._id) && (text(row.itemid) === text(item.itemid) || text(row.item).toLowerCase() === text(item.itemname).toLowerCase())) || {};
-        return { ...item, price: vi.price || item.estimatedprice || 0, gst: vi.gst || 0, discount: vi.discount || 0, vendor: matchingVendor.vendorname, vendorid: matchingVendor._id, total: calcLineTotal({ ...item, price: vi.price || item.estimatedprice, gst: vi.gst, discount: vi.discount }) };
+        return calculatePoLine({ ...item, price: vi.price ?? item.estimatedprice ?? 0, gst: vi.gst ?? 0, discount: vi.discount ?? 0, vendor: matchingVendor.vendorname, vendorid: matchingVendor._id }, true);
       });
       const total = priced.reduce((sum, item) => sum + num(item.total), 0);
       const signature = await getUserSignature();
-      const header = await saveRow("storepoorderds2", { poid, prnumber: assignment.prnumber, year: "2026-27", vendor: matchingVendor.vendorname, vendorid: matchingVendor._id, price: total, netprice: total, actualAmount: total, poType: "Standard", postatus: "Draft", approvalStatus: "Draft", creatorName: currentName(), creatorEmail: currentUser(), creatorSignature: signature.signaturelink || "", terms: terms || matchingVendor.payterm || "", warranty, description: `PO from PR ${assignment.prnumber}`, createdtime: nowTime() });
-      await Promise.all(priced.map((item) => saveRow("storepoitemsds2", { ...item, poid, postatus: "Draft", storereqid: assignment.requestid })));
-      await updateRow("storepoassignmentds2", assignment, { status: "PO Created", poid });
-      sendPurchase2Notification("PO Generated", { poid, prnumber: assignment.prnumber, amount: total, status: "Draft" });
-      setMessage(`PO ${poid} created as draft for ${matchingVendor.vendorname}`);
-      setSelectedPo(header);
-      setPoItems(priced);
+      const { header, items: savedItems } = await createPrPo(assignment, { year: "2026-27", vendorid: matchingVendor._id, creatorSignature: signature.signaturelink || "", terms: terms || matchingVendor.payterm || "", warranty, description: `PO from PR ${assignment.prnumber}`, createdtime: nowTime() }, priced);
+      sendPurchase2Notification("PO Generated", { poid: header.poid, prnumber: assignment.prnumber, amount: total, status: "Draft" });
+      setMessage(`PO ${header.poid} created as draft for ${matchingVendor.vendorname}`);
+      setSelectedPo({ ...header, ...summarizePo(priced) });
+      setPoItems(savedItems);
       await load();
     } catch (err) { setError(err.message); }
   };
@@ -1342,7 +1372,7 @@ function Purchase2ManagePoPage({ admin = false }) {
     try {
       if (!selectedPo) throw new Error("Open a PO first");
       if (text(selectedPo.postatus).toLowerCase() !== "draft") throw new Error("Only draft PO can be edited");
-      const updatedItems = poItems.map((item) => ({ ...item, total: calcLineTotal(item) }));
+      const updatedItems = poItems.map((item) => calculatePoLine(item, true));
       const total = updatedItems.reduce((sum, item) => sum + num(item.total), 0);
       const updated = await updateRow("storepoorderds2", selectedPo, { terms, warranty, price: total, netprice: total, actualAmount: total, updatedate: today() });
       await Promise.all(updatedItems.map((item) => {
@@ -1350,14 +1380,20 @@ function Purchase2ManagePoPage({ admin = false }) {
         delete payload.id;
         return item._id ? updateRow("storepoitemsds2", item, payload) : saveRow("storepoitemsds2", { ...payload, poid: selectedPo.poid, postatus: "Draft" });
       }));
-      setSelectedPo(updated);
+      const refreshed = await updateRow("storepoorderds2", updated, { terms, warranty });
+      setSelectedPo(refreshed);
       setPoItems(updatedItems);
       setMessage("Draft PO updated");
       await load();
-    } catch (err) { setError(err.message); }
+      return refreshed;
+    } catch (err) { setError(err.message); return null; }
   };
   const submitPo = async (po = selectedPo) => {
     try {
+      if (selectedPo?.poid === po.poid && text(po.postatus).toLowerCase() === "draft") {
+        po = await savePoDraft();
+        if (!po) return;
+      }
       const signature = await getUserSignature(po.creatorEmail || currentUser());
       const updated = await updateRow("storepoorderds2", po, { postatus: "Submitted", approvalStatus: "Pending", currentStep: po.currentStep || 1, creatorSignature: po.creatorSignature || signature.signaturelink || "", submittedtime: nowTime() });
       let emailNote = "";
@@ -1398,7 +1434,7 @@ function Purchase2ManagePoPage({ admin = false }) {
   return <Page title={admin ? "Manage PO Admin" : "Manage PO Creator"} subtitle={admin ? "View all PR and PO records and approve submitted POs." : "Create POs from PRs assigned to you and submit them for approval."} message={message} error={error}>
     <Paper sx={{ p: 2, mb: 2 }}>
       <Typography variant="h6">PR list</Typography>
-      <DataGrid autoHeight rows={(admin ? prs : assignments).map((r) => ({ ...r, id: r._id }))} columns={admin ? [{ field: "prnumber", headerName: "PR", width: 160 }, { field: "storename", headerName: "Store", width: 170 }, { field: "requestedbyemail", headerName: "Requested By", width: 220 }, { field: "status", headerName: "Status", width: 120 }] : [{ field: "prnumber", headerName: "PR", width: 160 }, { field: "assignedto", headerName: "Assigned To", width: 180 }, { field: "status", headerName: "Status", width: 140 }, { field: "actions", headerName: "Create PO", width: 140, renderCell: (p) => <Button size="small" disabled={text(p.row.status).toLowerCase() === "po created"} onClick={() => createPoFromAssignment(p.row)}>Create PO</Button> }]} slots={{ toolbar: GridToolbar }} />
+      <DataGrid autoHeight rows={(admin ? prs : assignments).map((r) => ({ ...r, id: r._id }))} columns={admin ? [{ field: "prnumber", headerName: "PR", width: 160 }, { field: "storename", headerName: "Store", width: 170 }, { field: "requestedbyemail", headerName: "Requested By", width: 220 }, { field: "status", headerName: "Status", width: 120 }] : [{ field: "prnumber", headerName: "PR", width: 160 }, { field: "assignedto", headerName: "Assigned To", width: 180 }, { field: "status", headerName: "Status", width: 140 }, { field: "actions", headerName: "Create PO", width: 140, renderCell: (p) => <PoActionButton size="small" disabled={text(p.row.status).toLowerCase() === "po created"} onClick={() => createPoFromAssignment(p.row)}>Create PO</PoActionButton> }]} slots={{ toolbar: GridToolbar }} />
     </Paper>
     <Paper sx={{ p: 2, mb: 2 }}>
       <Grid container spacing={2} sx={{ mb: 2 }}>
@@ -1408,29 +1444,29 @@ function Purchase2ManagePoPage({ admin = false }) {
         {admin && <Grid item xs={12} md={6}><Autocomplete options={recipientConfigs} value={recipientConfig} getOptionLabel={purchaseEmailLabel} onChange={(_, value) => setRecipientConfig(value)} renderInput={(params) => <TextField {...params} label="Mail recipient" size="small" />} /></Grid>}
         <Grid item xs={12}>
           <Stack direction="row" spacing={1} flexWrap="wrap">
-            <Button startIcon={<Refresh />} onClick={load}>Refresh</Button>
-            <Button variant="outlined" disabled={!selectedPo || text(selectedPo.postatus).toLowerCase() !== "draft"} onClick={savePoDraft}>Save draft changes</Button>
-            <Button variant="contained" disabled={!selectedPo || text(selectedPo.postatus).toLowerCase() !== "draft"} onClick={() => submitPo()}>Submit PO</Button>
-            <Button variant="contained" color="success" disabled={!selectedPo || text(selectedPo.postatus).toLowerCase() !== "submitted"} onClick={() => approvePo()}>Approve PO</Button>
-            <Button startIcon={<Print />} variant="outlined" disabled={!selectedPo} onClick={() => printPurchase2(selectedPo.poType === "Local" ? "localPo" : "po", { header: { ...selectedPo, terms, warranty }, items: poItems })}>Print PO</Button>
+            <PoActionButton startIcon={<Refresh />} onClick={load}>Refresh</PoActionButton>
+            <PoActionButton variant="outlined" disabled={!selectedPo || text(selectedPo.postatus).toLowerCase() !== "draft"} onClick={savePoDraft}>Save draft changes</PoActionButton>
+            <PoActionButton variant="contained" disabled={!selectedPo || text(selectedPo.postatus).toLowerCase() !== "draft"} onClick={() => submitPo()}>Submit PO</PoActionButton>
+            <PoActionButton variant="contained" color="success" disabled={!selectedPo || text(selectedPo.postatus).toLowerCase() !== "submitted"} onClick={() => approvePo()}>Approve PO</PoActionButton>
+            <PoActionButton startIcon={<Print />} variant="outlined" disabled={!selectedPo} onClick={() => printPurchase2(selectedPo.poType === "Local" ? "localPo" : "po", { header: { ...selectedPo, terms, warranty }, items: poItems })}>Print PO</PoActionButton>
           </Stack>
         </Grid>
       </Grid>
-      <DataGrid autoHeight rows={pos.map((r) => ({ ...r, id: r._id }))} columns={[{ field: "poid", headerName: "PO", width: 160 }, { field: "prnumber", headerName: "PR", width: 160 }, { field: "vendor", headerName: "Vendor", flex: 1 }, { field: "postatus", headerName: "PO Status", width: 130 }, { field: "approvalStatus", headerName: "Approval", width: 130 }, { field: "currentStep", headerName: "Level", width: 90 }, { field: "actualAmount", headerName: "Amount", width: 120 }, { field: "actions", headerName: "Open", width: 100, renderCell: (p) => <Button size="small" onClick={() => openPo(p.row)}>Open</Button> }]} slots={{ toolbar: GridToolbar }} />
+      <DataGrid autoHeight rows={pos.map((r) => ({ ...r, id: r._id }))} columns={[{ field: "poid", headerName: "PO", width: 160 }, { field: "prnumber", headerName: "PR", width: 160 }, { field: "vendor", headerName: "Vendor", flex: 1 }, { field: "postatus", headerName: "PO Status", width: 130 }, { field: "approvalStatus", headerName: "Approval", width: 130 }, { field: "currentStep", headerName: "Level", width: 90 }, { field: "actualAmount", headerName: "Amount", width: 120 }, { field: "actions", headerName: "Open", width: 100, renderCell: (p) => <PoActionButton size="small" onClick={() => openPo(p.row)}>Open</PoActionButton> }]} slots={{ toolbar: GridToolbar }} />
     </Paper>
     {selectedPo && <Paper sx={{ p: 2 }}>
       <Typography variant="h6">PO items: {selectedPo.poid}</Typography>
-      <DataGrid autoHeight rows={poItems.map((r, i) => ({ ...r, id: i }))} processRowUpdate={(row) => { setPoItems(poItems.map((item, index) => index === row.id ? { ...item, make: row.make || "", total: calcLineTotal(row) } : item)); return row; }} columns={[{ field: "itemname", headerName: "Item", flex: 1 }, { field: "make", headerName: "Make", width: 180, editable: text(selectedPo.postatus).toLowerCase() === "draft" }, { field: "quantity", headerName: "Qty", width: 100 }, { field: "price", headerName: "Rate", width: 110 }, { field: "gst", headerName: "GST", width: 90 }, { field: "total", headerName: "Total", width: 120 }]} />
+      <Purchase2PoAmountsEditor items={poItems} setItems={setPoItems} disabled={text(selectedPo.postatus).toLowerCase() !== "draft"} />
     </Paper>}
   </Page>;
 }
 
 export function Purchase2ManagePoAdminPage() {
-  return <Purchase2ManagePoPage admin />;
+  return <Purchase2PoWorkbench admin helpers={{ printPurchase2, loadMailConfigurations, activePurchaseEmails, sendConfiguredPurchaseEmail, sendPurchase2Notification }} />;
 }
 
 export function Purchase2ManagePoCreatorPage() {
-  return <Purchase2ManagePoPage />;
+  return <Purchase2PoWorkbench helpers={{ printPurchase2, loadMailConfigurations, activePurchaseEmails, sendConfiguredPurchaseEmail, sendPurchase2Notification }} />;
 }
 
 const humanCode = (prefix) => `${prefix}-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
@@ -1690,6 +1726,7 @@ export function Purchase2PeWorkbenchPage() {
   const [poItems, setPoItems] = useState([]);
   const [vendors, setVendors] = useState([]);
   const [vendor, setVendor] = useState(null);
+  const [receivingStores, setReceivingStores] = useState([]), [receivingStore, setReceivingStore] = useState(null);
   const [terms, setTerms] = useState("");
   const [warranty, setWarranty] = useState("");
   const [items, setItems] = useState([]);
@@ -1701,9 +1738,12 @@ export function Purchase2PeWorkbenchPage() {
   const [error, setError] = useState("");
   const load = async () => {
     try {
-      const [assignmentRows, prRows, poRows, vendorRows] = await Promise.all([getRows("storepoassignmentds2"), getRows("storeprrequestds2"), getRows("storepoorderds2"), getRows("vendorsds2")]);
+      const [assignmentRows, prRows, poRows, vendorRows, states, storeRows] = await Promise.all([getRows("storepoassignmentds2"), getRows("storeprrequestds2"), getRows("storepoorderds2"), getRows("vendorsds2"), getPrAvailability(), getRows('storemasterds2')]);
+      setReceivingStores(storeRows);
       const email = text(currentUser()).toLowerCase();
-      setAssignments(assignmentRows.filter((row) => sameEmail(row.assignedtoemail, email)));
+      const available = pendingPoAssignments(assignmentRows.filter((row) => sameEmail(row.assignedtoemail, email)), states);
+      setAssignments(available);
+      if (selectedAssignment && !available.some(row => row._id === selectedAssignment._id)) { setSelectedAssignment(null); setItems([]); }
       setPrs(prRows);
       setPos(poRows.filter((row) => sameEmail(row.creatorEmail || row.user, email)));
       setVendors(vendorRows);
@@ -1717,33 +1757,41 @@ export function Purchase2PeWorkbenchPage() {
     activePurchaseEmails("PO").then((rows) => { setRecipientConfigs(rows); setRecipientConfig(rows[0] || null); }).catch(() => setRecipientConfigs([]));
   }, []);
   const loadAssignmentItems = async (assignment) => {
-    setSelectedAssignment(assignment);
-    const prItems = assignment?.prnumber ? await getRows("storeprrequestitemsds2", [{ field: "prnumber", value: assignment.prnumber }]) : [];
-    setItems(prItems);
+    setSelectedAssignment(assignment); setItems([]);
+    try { if (assignment?.prnumber) setItems(await remainingPrItems(assignment)); }
+    catch (error) { setSelectedAssignment(null); setError(error.message); await load(); }
   };
   const createPo = async (empty = false) => {
     try {
       if (!vendor) throw new Error("Select vendor");
-      const sourceItems = empty ? items : (items.length ? items : await getRows("storeprrequestitemsds2", [{ field: "prnumber", value: selectedAssignment?.prnumber }]));
+      if (!empty && !selectedAssignment) throw new Error('Select an available assigned PR');
+      if (empty && selectedAssignment) throw new Error('Clear the PR selection before creating an empty PO');
+      if (empty && !receivingStore) throw new Error('Select a receiving store');
+      const sourceItems = items;
       if (!sourceItems.length) throw new Error("Add items or select a PR with items");
       const poid = humanCode("PO");
-      const priced = sourceItems.map((item) => ({ ...item, vendor: vendor.vendorname, vendorid: vendor._id, price: item.price || item.estimatedprice || item.rate || 0, total: calcLineTotal({ ...item, price: item.price || item.estimatedprice || item.rate || 0 }) }));
+      const priced = sourceItems.map((item) => calculatePoLine({ ...item, vendor: vendor.vendorname, vendorid: vendor._id, price: item.price ?? item.estimatedprice ?? item.rate ?? 0 }, true));
       const total = priced.reduce((sum, item) => sum + num(item.total), 0);
       const sig = await getUserSignature();
-      const header = await saveRow("storepoorderds2", { poid, prnumber: empty ? "" : selectedAssignment?.prnumber, vendor: vendor.vendorname, vendorid: vendor._id, price: total, netprice: total, actualAmount: total, poType: empty ? "Empty" : "Standard", postatus: "Draft", approvalStatus: "Draft", creatorName: currentName(), creatorEmail: currentUser(), creatorSignature: sig.signaturelink || "", terms, warranty, createdtime: nowTime() });
-      await Promise.all(priced.map((item) => saveRow("storepoitemsds2", { ...item, poid, postatus: "Draft" })));
-      if (selectedAssignment && !empty) await updateRow("storepoassignmentds2", selectedAssignment, { status: "PO Created", poid });
-      sendPurchase2Notification("PO Generated", { poid, prnumber: empty ? "" : selectedAssignment?.prnumber, amount: total, status: "Draft" });
+      let header, savedItems;
+      if (empty) {
+        header = await saveRow("storepoorderds2", { poid, ...(receivingStore ? resolvePoDelivery({ storeid: receivingStore._id }, receivingStores) : {}), vendor: vendor.vendorname, vendorid: vendor._id, price: total, netprice: total, actualAmount: total, poType: "Empty", postatus: "Draft", approvalStatus: "Draft", creatorName: currentName(), creatorEmail: currentUser(), creatorSignature: sig.signaturelink || "", terms, warranty, createdtime: nowTime() });
+        savedItems = await Promise.all(priced.map(item => saveRow('storepoitemsds2', { ...item, poid, postatus: 'Draft' })));
+      } else {
+        const result = await createPrPo(selectedAssignment, { vendorid: vendor._id, ...(receivingStore ? { storeid: receivingStore._id } : {}), creatorSignature: sig.signaturelink || '', terms, warranty, createdtime: nowTime() }, priced);
+        header = result.header; savedItems = result.items;
+      }
+      sendPurchase2Notification("PO Generated", { poid: header.poid, prnumber: empty ? "" : selectedAssignment?.prnumber, amount: total, status: "Draft" });
       let emailNote = "";
       try {
-        const sent = await sendConfiguredPurchaseEmail(mailConfig, recipientConfig, empty ? "Empty purchase order created" : "Purchase order created from PR", { "PO Number": poid, "PR Number": empty ? "" : selectedAssignment?.prnumber, Vendor: vendor.vendorname, "PO Type": empty ? "Empty" : "Standard", Status: "Draft", Amount: total, "Created By": currentName(), "Created Email": currentUser(), Date: today(), Time: nowTime(), Terms: terms, Warranty: warranty }, priced);
+        const sent = await sendConfiguredPurchaseEmail(mailConfig, recipientConfig, empty ? "Empty purchase order created" : "Purchase order created from PR", { "PO Number": header.poid, "PR Number": empty ? "" : selectedAssignment?.prnumber, Vendor: vendor.vendorname, "PO Type": empty ? "Empty" : "Standard", Status: "Draft", Amount: total, "Created By": currentName(), "Created Email": currentUser(), Date: today(), Time: nowTime(), Terms: terms, Warranty: warranty }, priced);
         emailNote = sent?.skipped ? ` Email not sent: ${sent.reason || "configuration missing"}.` : ` Email sent to ${sent.email}.`;
       } catch (mailError) {
         emailNote = ` Email failed: ${mailError.response?.data?.message || mailError.response?.data?.msg || mailError.message || "Unable to send"}.`;
       }
-      setSelectedPo(header);
-      setPoItems(priced);
-      setMessage(`PO ${poid} created.${emailNote}`);
+      setSelectedPo({ ...header, ...summarizePo(priced) });
+      setPoItems(savedItems);
+      setMessage(`PO ${header.poid} created.${emailNote}`);
       await load();
     } catch (err) {
       setError(err.message || "Unable to create PO");
@@ -1755,11 +1803,18 @@ export function Purchase2PeWorkbenchPage() {
     setWarranty(po.warranty || "");
     setPoItems(await getRows("storepoitemsds2", [{ field: "poid", value: po.poid }]));
   };
+  const savePoDraft = async () => {
+    if (!selectedPo?._id || text(selectedPo.postatus).toLowerCase() !== "draft") throw new Error("Open a draft PO");
+    const result = await ep1.post('/api/v2/purchase2/po-draft/save', { id: selectedPo._id, header: { ...selectedPo, terms, warranty }, items: poItems }, { headers: { Authorization: `Bearer ${global1.token}` } });
+    setPoItems(result.data.data.items); setSelectedPo(result.data.data.header);
+    return result.data.data.header;
+  };
   const submitPo = async () => {
     try {
       if (!selectedPo?._id) throw new Error("Open a PO");
-      const updated = await updateRow("storepoorderds2", selectedPo, { postatus: "Submitted", approvalStatus: "Pending", terms, warranty, submittedtime: nowTime() });
-      setSelectedPo(updated);
+      await savePoDraft();
+      const result = await ep1.post('/api/v2/purchase2/po-draft/action', { id: selectedPo._id, action: 'submit' }, { headers: { Authorization: `Bearer ${global1.token}` } });
+      setSelectedPo(result.data.data);
       setMessage("PO submitted");
       await load();
     } catch (err) {
@@ -1768,13 +1823,14 @@ export function Purchase2PeWorkbenchPage() {
   };
   return (
     <Page title="PE Workbench" subtitle="Unified purchase executive workbench for PO workflow and imprest management." message={message} error={error}>
+      {mainTab === 'po' && <Paper sx={{ p: 2, mb: 2 }}><Autocomplete options={receivingStores} value={subTab === 'manage' ? receivingStores.find(row => row._id === selectedPo?.storeid) || null : receivingStore} disabled={subTab === 'manage' && (!selectedPo || selectedPo.postatus !== 'Draft')} getOptionLabel={row => row.storename || row.name || ''} onChange={(_, value) => { if (subTab === 'manage') setSelectedPo(previous => ({ ...previous, storeid: value?._id || '' })); else setReceivingStore(value); }} renderInput={params => <TextField {...params} label="Receiving store" size="small" />} /></Paper>}
       <Paper sx={{ p: 2 }}>
         <Tabs value={mainTab} onChange={(_, v) => setMainTab(v)}><Tab value="po" label="PO Workflow" /><Tab value="imprest" label="Imprest Management" /></Tabs>
         {mainTab === "po" && <Box sx={{ mt: 2 }}>
           <Tabs value={subTab} onChange={(_, v) => setSubTab(v)}><Tab value="store" label="Store Requests" /><Tab value="create" label="Create PO" /><Tab value="manage" label="Manage PO" /></Tabs>
-          {subTab === "store" && <DataGrid sx={{ mt: 2 }} autoHeight rows={assignments.map((row) => ({ ...row, id: row._id }))} columns={[{ field: "prnumber", headerName: "PR", width: 170 }, { field: "assigneddate", headerName: "Assigned Date", width: 150 }, { field: "assignedby", headerName: "Assigned By", width: 180 }, { field: "status", headerName: "Status", width: 130 }, { field: "remarks", headerName: "Remarks", flex: 1 }, { field: "actions", headerName: "Select", width: 110, renderCell: (p) => <Button size="small" onClick={() => { loadAssignmentItems(p.row); setSubTab("create"); }}>Create PO</Button> }]} slots={{ toolbar: GridToolbar }} />}
-          {subTab === "create" && <Box sx={{ mt: 2 }}><Grid container spacing={2}><Grid item xs={12} md={3}><Autocomplete options={assignments} value={selectedAssignment} onChange={(_, v) => loadAssignmentItems(v)} getOptionLabel={(o) => `${o.prnumber || ""} - ${o.status || ""}`} renderInput={(params) => <TextField {...params} label="Select assigned PR, optional" size="small" />} /></Grid><Grid item xs={12} md={3}><Autocomplete options={vendors} value={vendor} onChange={(_, v) => setVendor(v)} getOptionLabel={(o) => o.vendorname || o.name || ""} renderInput={(params) => <TextField {...params} label="Vendor" size="small" />} /></Grid><Grid item xs={12} md={3}><Autocomplete options={mailConfigs} value={mailConfig} onChange={(_, v) => setMailConfig(v)} getOptionLabel={mailConfigurationLabel} renderInput={(params) => <TextField {...params} label="Mail configuration" size="small" />} /></Grid><Grid item xs={12} md={3}><Autocomplete options={recipientConfigs} value={recipientConfig} onChange={(_, v) => setRecipientConfig(v)} getOptionLabel={purchaseEmailLabel} renderInput={(params) => <TextField {...params} label="Mail recipient" size="small" />} /></Grid><Grid item xs={12}><Stack direction="row" spacing={1} flexWrap="wrap"><Button variant="contained" onClick={() => createPo(false)}>Create PO from PR</Button><Button variant="outlined" onClick={() => createPo(true)}>Create Empty PO</Button></Stack></Grid><Grid item xs={12} md={6}><TextField label="Terms" value={terms} onChange={(e) => setTerms(e.target.value)} multiline minRows={3} fullWidth /></Grid><Grid item xs={12} md={6}><TextField label="Warranty" value={warranty} onChange={(e) => setWarranty(e.target.value)} multiline minRows={3} fullWidth /></Grid></Grid><Box sx={{ mt: 2 }}><ItemsEditor items={items} setItems={setItems} showMake showPrice showUnit /></Box></Box>}
-          {subTab === "manage" && <Box sx={{ mt: 2 }}><Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mb: 2 }}><Button startIcon={<Refresh />} onClick={load}>Refresh</Button><Button variant="contained" disabled={!selectedPo?._id || text(selectedPo.postatus).toLowerCase() !== "draft"} onClick={submitPo}>Submit PO</Button><Button startIcon={<Print />} variant="outlined" disabled={!selectedPo?._id} onClick={() => printPurchase2(selectedPo.poType === "Local" ? "localPo" : "po", { header: { ...selectedPo, terms, warranty }, items: poItems })}>Print PO</Button></Stack><Grid container spacing={2}><Grid item xs={12} md={6}><TextField label="Terms" value={terms} onChange={(e) => setTerms(e.target.value)} multiline minRows={3} fullWidth /></Grid><Grid item xs={12} md={6}><TextField label="Warranty" value={warranty} onChange={(e) => setWarranty(e.target.value)} multiline minRows={3} fullWidth /></Grid></Grid><DataGrid sx={{ mt: 2 }} autoHeight rows={pos.map((row) => ({ ...row, id: row._id }))} columns={[{ field: "poid", headerName: "PO", width: 170 }, { field: "prnumber", headerName: "PR", width: 160 }, { field: "vendor", headerName: "Vendor", flex: 1 }, { field: "postatus", headerName: "PO Status", width: 140 }, { field: "approvalStatus", headerName: "Approval", width: 140 }, { field: "actualAmount", headerName: "Amount", width: 120 }, { field: "actions", headerName: "Open", width: 100, renderCell: (p) => <Button size="small" onClick={() => openPo(p.row)}>Open</Button> }]} slots={{ toolbar: GridToolbar }} />{selectedPo && <DataGrid sx={{ mt: 2 }} autoHeight rows={poItems.map((row, index) => ({ ...row, id: index }))} columns={[{ field: "itemname", headerName: "Item", flex: 1 }, { field: "make", headerName: "Make", width: 150 }, { field: "quantity", headerName: "Qty", width: 100 }, { field: "price", headerName: "Rate", width: 100 }, { field: "total", headerName: "Total", width: 120 }]} />}</Box>}
+          {subTab === "store" && <DataGrid sx={{ mt: 2 }} autoHeight rows={assignments.map((row) => ({ ...row, id: row._id }))} columns={[{ field: "prnumber", headerName: "PR", width: 170 }, { field: "assigneddate", headerName: "Assigned Date", width: 150 }, { field: "assignedby", headerName: "Assigned By", width: 180 }, { field: "status", headerName: "Status", width: 130 }, { field: "remarks", headerName: "Remarks", flex: 1 }, { field: "actions", headerName: "Select", width: 110, renderCell: (p) => <PoActionButton size="small" onClick={() => { loadAssignmentItems(p.row); setSubTab("create"); }}>Create PO</PoActionButton> }]} slots={{ toolbar: GridToolbar }} />}
+          {subTab === "create" && <Box sx={{ mt: 2 }}><Grid container spacing={2}><Grid item xs={12} md={3}><Autocomplete options={assignments} value={selectedAssignment} onChange={(_, v) => loadAssignmentItems(v)} getOptionLabel={(o) => `${o.prnumber || ""} - ${o.status || ""}`} renderInput={(params) => <TextField {...params} label="Select assigned PR, optional" size="small" />} /></Grid><Grid item xs={12} md={3}><Autocomplete options={vendors} value={vendor} onChange={(_, v) => setVendor(v)} getOptionLabel={(o) => o.vendorname || o.name || ""} renderInput={(params) => <TextField {...params} label="Vendor" size="small" />} /></Grid><Grid item xs={12} md={3}><Autocomplete options={mailConfigs} value={mailConfig} onChange={(_, v) => setMailConfig(v)} getOptionLabel={mailConfigurationLabel} renderInput={(params) => <TextField {...params} label="Mail configuration" size="small" />} /></Grid><Grid item xs={12} md={3}><Autocomplete options={recipientConfigs} value={recipientConfig} onChange={(_, v) => setRecipientConfig(v)} getOptionLabel={purchaseEmailLabel} renderInput={(params) => <TextField {...params} label="Mail recipient" size="small" />} /></Grid><Grid item xs={12}><Stack direction="row" spacing={1} flexWrap="wrap"><PoActionButton variant="contained" disabled={!selectedAssignment || !items.length} onClick={() => createPo(false)}>Create PO from PR</PoActionButton><PoActionButton variant="outlined" disabled={Boolean(selectedAssignment) || !items.length} onClick={() => createPo(true)}>Create Empty PO</PoActionButton></Stack></Grid><Grid item xs={12} md={6}><TextField label="Terms" value={terms} onChange={(e) => setTerms(e.target.value)} multiline minRows={3} fullWidth /></Grid><Grid item xs={12} md={6}><TextField label="Warranty" value={warranty} onChange={(e) => setWarranty(e.target.value)} multiline minRows={3} fullWidth /></Grid></Grid><Box sx={{ mt: 2 }}><ItemsEditor items={items} setItems={setItems} financial showMake showPrice showUnit /></Box></Box>}
+          {subTab === "manage" && <Box sx={{ mt: 2 }}><Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mb: 2 }}><PoActionButton startIcon={<Refresh />} onClick={load}>Refresh</PoActionButton><PoActionButton variant="outlined" disabled={!selectedPo?._id || text(selectedPo.postatus).toLowerCase() !== "draft"} onClick={async () => { try { await savePoDraft(); setMessage("Draft PO updated"); await load(); } catch (err) { setError(err.message); } }}>Save draft changes</PoActionButton><PoActionButton variant="contained" disabled={!selectedPo?._id || text(selectedPo.postatus).toLowerCase() !== "draft"} onClick={submitPo}>Submit PO</PoActionButton><PoActionButton startIcon={<Print />} variant="outlined" disabled={!selectedPo?._id} onClick={() => printPurchase2(selectedPo.poType === "Local" ? "localPo" : "po", { header: { ...selectedPo, terms, warranty }, items: poItems })}>Print PO</PoActionButton></Stack><Grid container spacing={2}><Grid item xs={12} md={6}><TextField label="Terms" value={terms} onChange={(e) => setTerms(e.target.value)} multiline minRows={3} fullWidth /></Grid><Grid item xs={12} md={6}><TextField label="Warranty" value={warranty} onChange={(e) => setWarranty(e.target.value)} multiline minRows={3} fullWidth /></Grid></Grid><DataGrid sx={{ mt: 2 }} autoHeight rows={pos.map((row) => ({ ...row, id: row._id }))} columns={[{ field: "poid", headerName: "PO", width: 170 }, { field: "prnumber", headerName: "PR", width: 160 }, { field: "vendor", headerName: "Vendor", flex: 1 }, { field: "postatus", headerName: "PO Status", width: 140 }, { field: "approvalStatus", headerName: "Approval", width: 140 }, { field: "actualAmount", headerName: "Amount", width: 120 }, { field: "actions", headerName: "Open", width: 100, renderCell: (p) => <PoActionButton size="small" onClick={() => openPo(p.row)}>Open</PoActionButton> }]} slots={{ toolbar: GridToolbar }} />{selectedPo && <Purchase2PoAmountsEditor items={poItems} setItems={setPoItems} disabled={text(selectedPo.postatus).toLowerCase() !== "draft"} />}</Box>}
         </Box>}
         {mainTab === "imprest" && <Box sx={{ mt: 2 }}><ImprestPanel /></Box>}
       </Paper>
@@ -2014,6 +2070,127 @@ export function UserSignatureUploadPage() {
     } catch (err) { setError(err.message || "Unable to save signature"); }
   };
   return <Page title="User Signature Upload" subtitle="Upload user signatures through AWS and use them in Purchase 2 print documents." message={message} error={error}><Paper sx={{ p: 2, mb: 2 }}><Grid container spacing={2}><Grid item xs={12} md={4}><Autocomplete options={users} value={selectedUser} onChange={(_, v) => setSelectedUser(v)} getOptionLabel={(o) => `${o.name || ""} ${o.email || o.user || ""}`} renderInput={(params) => <TextField {...params} label="User" size="small" />} /></Grid><Grid item xs={12} md={3}><TextField select size="small" label="AWS config" value={awsconfigid} onChange={(e) => setAwsconfigid(e.target.value)} fullWidth><MenuItem value="">Select</MenuItem>{configs.map((cfg) => <MenuItem key={cfg._id} value={cfg._id}>{cfg.name || cfg.configname || cfg.bucket}</MenuItem>)}</TextField></Grid><Grid item xs={12} md={3}><Button component="label" startIcon={<UploadFile />} variant="outlined" fullWidth>{file?.name || "Upload signature"}<input type="file" accept="image/*" hidden onChange={(e) => setFile(e.target.files?.[0] || null)} /></Button></Grid><Grid item xs={12} md={2}><Button fullWidth variant="contained" onClick={upload}>Save</Button></Grid><Grid item xs={12}><TextField size="small" label="Or paste signature link" value={signaturelink} onChange={(e) => setSignaturelink(e.target.value)} fullWidth /></Grid></Grid></Paper><DataGrid autoHeight rows={rows.map((r) => ({ ...r, id: r._id }))} columns={[{ field: "username", headerName: "Name", flex: 1 }, { field: "useremail", headerName: "Email", flex: 1 }, { field: "signaturelink", headerName: "Signature Link", flex: 1, renderCell: (p) => p.value ? <a href={p.value} target="_blank" rel="noreferrer">View</a> : "-" }, { field: "status", headerName: "Status", width: 120 }]} slots={{ toolbar: GridToolbar }} /></Page>;
+}
+
+export function StudentSignatureUploadPage() {
+  const [rows, setRows] = useState([]);
+  const [configs, setConfigs] = useState([]);
+  const [awsconfigid, setAwsconfigid] = useState("");
+  const [file, setFile] = useState(null);
+  const [signaturelink, setSignaturelink] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const studentEmail = currentUser();
+  const studentName = currentName();
+
+  const load = async () => {
+    try {
+      setError("");
+      const [signatureRows, configRes] = await Promise.all([
+        getRows("usersignatureds", [{ field: "useremail", value: studentEmail }]),
+        ep1.get("/api/v2/aws-file-library/configs", { params: { colid: global1.colid } })
+      ]);
+      setRows(signatureRows);
+      setConfigs(configRes.data || []);
+    } catch (err) {
+      setError(err.message || "Unable to load signature details");
+    }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const upload = async () => {
+    try {
+      setBusy(true);
+      setError("");
+      setMessage("");
+      let link = signaturelink;
+      if (file) {
+        if (!awsconfigid) throw new Error("Select AWS configuration");
+        const data = new FormData();
+        data.append("file", file);
+        data.append("colid", global1.colid);
+        data.append("user", studentEmail || "");
+        data.append("awsconfigid", awsconfigid);
+        data.append("folder", "student-signatures");
+        data.append("description", "Student signature");
+        const res = await ep1.post("/api/v2/aws-file-library/upload", data, { headers: { "Content-Type": "multipart/form-data" } });
+        link = res.data?.url || link;
+      }
+      if (!studentEmail || studentEmail === "NA") throw new Error("Logged in student email is not available");
+      if (!link) throw new Error("Upload signature or paste signature link");
+      const activeRow = rows.find((row) => text(row.status || "Active").toLowerCase() === "active") || rows[0];
+      await saveRow("usersignatureds", {
+        ...(activeRow ? { id: activeRow._id } : {}),
+        username: studentName || "",
+        useremail: studentEmail || "",
+        signaturelink: link,
+        status: "Active",
+        signaturetype: "Student"
+      });
+      setMessage("Signature saved");
+      setFile(null);
+      setSignaturelink("");
+      await load();
+    } catch (err) {
+      setError(err.message || "Unable to save signature");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <MenuPageShell title="Student Signature Upload" menuType="student">
+      <Box sx={{ mb: 2 }}>
+        <Typography variant="h5" fontWeight={800}>Student Signature Upload</Typography>
+        <Typography variant="body2" color="text.secondary">Upload your own signature. No student or user selection is required.</Typography>
+      </Box>
+      {message && <Alert severity="success" sx={{ mb: 2 }}>{message}</Alert>}
+      {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+      <Paper sx={{ p: 2, mb: 2 }}>
+        <Grid container spacing={2}>
+          <Grid item xs={12} md={4}>
+            <TextField size="small" label="Student" value={studentName} fullWidth InputProps={{ readOnly: true }} />
+          </Grid>
+          <Grid item xs={12} md={4}>
+            <TextField size="small" label="Email" value={studentEmail} fullWidth InputProps={{ readOnly: true }} />
+          </Grid>
+          <Grid item xs={12} md={4}>
+            <TextField select size="small" label="AWS config" value={awsconfigid} onChange={(e) => setAwsconfigid(e.target.value)} fullWidth>
+              <MenuItem value="">Select</MenuItem>
+              {configs.map((cfg) => <MenuItem key={cfg._id} value={cfg._id}>{cfg.name || cfg.configname || cfg.bucket}</MenuItem>)}
+            </TextField>
+          </Grid>
+          <Grid item xs={12} md={4}>
+            <Button component="label" startIcon={<UploadFile />} variant="outlined" fullWidth disabled={busy}>
+              {file?.name || "Upload signature"}
+              <input type="file" accept="image/*" hidden onChange={(e) => setFile(e.target.files?.[0] || null)} />
+            </Button>
+          </Grid>
+          <Grid item xs={12} md={6}>
+            <TextField size="small" label="Or paste signature link" value={signaturelink} onChange={(e) => setSignaturelink(e.target.value)} fullWidth />
+          </Grid>
+          <Grid item xs={12} md={2}>
+            <Button fullWidth variant="contained" onClick={upload} disabled={busy} sx={{ height: "100%" }}>
+              {busy ? "Saving..." : "Save"}
+            </Button>
+          </Grid>
+        </Grid>
+      </Paper>
+      <DataGrid
+        autoHeight
+        rows={rows.map((row) => ({ ...row, id: row._id }))}
+        columns={[
+          { field: "username", headerName: "Name", flex: 1 },
+          { field: "useremail", headerName: "Email", flex: 1 },
+          { field: "signaturelink", headerName: "Signature Link", flex: 1, renderCell: (params) => params.value ? <a href={params.value} target="_blank" rel="noreferrer">View</a> : "-" },
+          { field: "status", headerName: "Status", width: 120 }
+        ]}
+        slots={{ toolbar: GridToolbar }}
+      />
+    </MenuPageShell>
+  );
 }
 
 export function Purchase2GatePassPage() {

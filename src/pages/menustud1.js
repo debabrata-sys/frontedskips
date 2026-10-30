@@ -76,6 +76,31 @@ const AccordionDetails = styled(MuiAccordionDetails)(({ theme }) => ({
   borderTop: '1px solid rgba(0, 0, 0, .125)',
 }));
 
+
+const hiddenStudentMenuGroups = new Set([
+  'central ticketing',
+  'academics',
+  'alumni interaction',
+  'student data',
+  'hostel',
+  'fees ledger',
+  'certificates',
+  'breakout rooms',
+  'breakpout rooms',
+  'discussion board',
+  'forum',
+  'reevaluation',
+  'placement',
+  'placement new',
+  'my data',
+  'virtual lab',
+  'virtual lab games'
+]);
+
+const normalizeStudentMenuLabel = (value = '') => String(value).toLowerCase().replace(/\s+/g, ' ').trim();
+const isStudentMenuGroupHidden = (group = '') => hiddenStudentMenuGroups.has(normalizeStudentMenuLabel(group));
+const StudentMenuSection = ({ group, children }) => (isStudentMenuGroupHidden(group) ? null : <>{children}</>);
+
 const getGroupIcon = (group = '') => {
   const value = String(group).toLowerCase();
   if (value.includes('dashboard')) return <DashboardIcon sx={{ marginRight: 1 }} />;
@@ -91,7 +116,7 @@ const getGroupIcon = (group = '') => {
 function RenderStudentGroups({ open, groups }) {
   return (
     <div style={{ overflowY: 'scroll', height: 600, width: 300, fontSize: 10 }}>
-      {(groups || []).map((group, groupIndex) => (
+      {(groups || []).filter((group) => !isStudentMenuGroupHidden(group.group)).map((group, groupIndex) => (
         <Accordion key={`${group.group}-${groupIndex}`}>
           <AccordionSummary aria-controls={`student-custom-${groupIndex}`} id={`student-custom-${groupIndex}-header`}>
             {getGroupIcon(group.group)}
@@ -172,7 +197,8 @@ function DefaultStudentListItems({ open }) {
         </AccordionDetails>
       </Accordion>
 
-      <Accordion>
+      <StudentMenuSection group="Central Ticketing">
+<Accordion>
         <AccordionSummary aria-controls="panel-central-ticket-content" id="panel-central-ticket-header">
           <BusinessIcon sx={{ marginRight: 1 }} />
           {open && <Typography sx={{fontSize: 14}}>Central Ticketing</Typography>}
@@ -186,6 +212,7 @@ function DefaultStudentListItems({ open }) {
           </ListItem>
         </AccordionDetails>
       </Accordion>
+      </StudentMenuSection>
 
       <Accordion>
         <AccordionSummary aria-controls="panel-convocation-new-content" id="panel-convocation-new-header">
@@ -234,6 +261,20 @@ function DefaultStudentListItems({ open }) {
 <AccountBalanceWalletIcon />
 </ListItemIcon>
 {open && <ListItemText primaryTypographyProps={{fontSize: "14px"}} primary="Bank account" />}
+</ListItem>
+
+        <ListItem button component={RouterLink} to="/student-profile-photo-upload">
+<ListItemIcon>
+<PersonIcon />
+</ListItemIcon>
+{open && <ListItemText primaryTypographyProps={{fontSize: "14px"}} primary="Student photo upload" />}
+</ListItem>
+
+        <ListItem button component={RouterLink} to="/student-signature-upload">
+<ListItemIcon>
+<PersonIcon />
+</ListItemIcon>
+{open && <ListItemText primaryTypographyProps={{fontSize: "14px"}} primary="Signature upload" />}
 </ListItem>
 
         <ListItem button component={RouterLink} to="/studentlocationpublish">
@@ -332,7 +373,8 @@ function DefaultStudentListItems({ open }) {
         </AccordionDetails>
       </Accordion>
 
-      <Accordion>
+      <StudentMenuSection group="Academics">
+<Accordion>
         <AccordionSummary aria-controls="panel1-content" id="panel1-header">
           <AccountCircleIcon sx={{ marginRight: 1 }} />
           {open && <Typography sx={{fontSize: 14}}>Academics</Typography>}
@@ -359,6 +401,7 @@ function DefaultStudentListItems({ open }) {
 
         </AccordionDetails>
       </Accordion>
+      </StudentMenuSection>
 
        {/* <Accordion>
         <AccordionSummary aria-controls="panel3-content" id="panel3-header">
@@ -471,6 +514,13 @@ function DefaultStudentListItems({ open }) {
 {open && <ListItemText primaryTypographyProps={{fontSize: "14px"}} primary="OTP Attendance" />}
 </ListItem>
 
+           <ListItem button component={RouterLink} to="/studentneplmsenrollmentotpattendance">
+<ListItemIcon>
+<PersonIcon />
+</ListItemIcon>
+{open && <ListItemText primaryTypographyProps={{fontSize: "14px", whiteSpace: "normal"}} primary="Enrollment OTP Attendance" />}
+</ListItem>
+
            <ListItem button component={RouterLink} to="/studentneplmslivequiz">
 <ListItemIcon>
 <PersonIcon />
@@ -558,6 +608,13 @@ function DefaultStudentListItems({ open }) {
 	{open && <ListItemText primaryTypographyProps={{fontSize: "14px", whiteSpace: "normal"}} primary="Marks view" />}
 	</ListItem>
 
+	           <ListItem button component={RouterLink} to="/student-online-exam-marks-view-co-bloom">
+	<ListItemIcon>
+	<PersonIcon />
+	</ListItemIcon>
+	{open && <ListItemText primaryTypographyProps={{fontSize: "14px", whiteSpace: "normal"}} primary="Marks view CO Bloom" />}
+	</ListItem>
+
 	           <ListItem button component={RouterLink} to="/student-course-group-exam">
 	<ListItemIcon>
 	<PersonIcon />
@@ -623,7 +680,8 @@ function DefaultStudentListItems({ open }) {
         </AccordionDetails>
         </Accordion>
 
-        <Accordion>
+        <StudentMenuSection group="Alumni interaction">
+<Accordion>
                 <AccordionSummary aria-controls="panel2-content" id="panel2-header">
                   <SettingsIcon sx={{ marginRight: 1 }} />
                   {open && <Typography sx={{ fontSize: 14 }}>Alumni interaction</Typography>}
@@ -655,9 +713,11 @@ function DefaultStudentListItems({ open }) {
         
                 </AccordionDetails>
                 </Accordion>
+      </StudentMenuSection>
 
 
-       <Accordion>
+       <StudentMenuSection group="Student data">
+<Accordion>
         <AccordionSummary aria-controls="panel3-content" id="panel3-header">
           <BusinessIcon sx={{ marginRight: 1 }} />
           {open && <Typography sx={{fontSize: 14}}>Student data</Typography>}
@@ -681,8 +741,10 @@ function DefaultStudentListItems({ open }) {
 
           </AccordionDetails>
           </Accordion>
+      </StudentMenuSection>
 
-           <Accordion>
+           <StudentMenuSection group="Hostel">
+<Accordion>
         <AccordionSummary aria-controls="panel3-content" id="panel3-header">
           <BusinessIcon sx={{ marginRight: 1 }} />
           {open && <Typography sx={{fontSize: 14}}>Hostel</Typography>}
@@ -705,6 +767,7 @@ function DefaultStudentListItems({ open }) {
 
         </AccordionDetails>
         </Accordion>
+      </StudentMenuSection>
 
        <Accordion>
         <AccordionSummary aria-controls="panel-student-fees-payment-content" id="panel-student-fees-payment-header">
@@ -725,6 +788,18 @@ function DefaultStudentListItems({ open }) {
 <AccountBalanceWalletIcon />
 </ListItemIcon>
 {open && <ListItemText primaryTypographyProps={{fontSize: "14px", whiteSpace: "normal"}} primary="Pay fees online 2" />}
+</ListItem>
+
+           <ListItem button component={RouterLink} to="/studentonlinefeepayment3">
+<ListItemIcon>
+<AccountBalanceWalletIcon />
+</ListItemIcon>
+{open && <ListItemText primaryTypographyProps={{fontSize: "14px", whiteSpace: "normal"}} primary="Pay fees online Cashfree" />}
+</ListItem>
+
+           <ListItem button component={RouterLink} to="/student-online-fees-3">
+<ListItemIcon><AccountBalanceWalletIcon /></ListItemIcon>
+{open && <ListItemText primaryTypographyProps={{fontSize: "14px", whiteSpace: "normal"}} primary="Online fees 3" />}
 </ListItem>
 
            <ListItem button component={RouterLink} to="/studentmyonlinepaymentreport">
@@ -828,7 +903,8 @@ function DefaultStudentListItems({ open }) {
         </AccordionDetails>
         </Accordion>
 
-          <Accordion>
+          <StudentMenuSection group="Placement new">
+<Accordion>
         <AccordionSummary aria-controls="panel-placement-new-student-content" id="panel-placement-new-student-header">
           <BusinessIcon sx={{ marginRight: 1 }} />
           {open && <Typography sx={{fontSize: 14}}>Placement new</Typography>}
@@ -928,8 +1004,25 @@ function DefaultStudentListItems({ open }) {
 
         </AccordionDetails>
         </Accordion>
+      </StudentMenuSection>
 
        <Accordion>
+        <AccordionSummary aria-controls="skill-development-student-content" id="skill-development-student-header">
+          <AutoStoriesIcon sx={{ marginRight: 1 }} />
+          {open && <Typography sx={{fontSize: 14}}>Skill development</Typography>}
+        </AccordionSummary>
+        <AccordionDetails>
+          <ListItem button component={RouterLink} to="/student-skill-development-zone">
+            <ListItemIcon>
+              <AutoStoriesIcon />
+            </ListItemIcon>
+            {open && <ListItemText primaryTypographyProps={{fontSize: "14px", whiteSpace: "normal"}} primary="Skill development" />}
+          </ListItem>
+        </AccordionDetails>
+        </Accordion>
+
+       <StudentMenuSection group="Fees Ledger">
+<Accordion>
         <AccordionSummary aria-controls="panel3-content" id="panel3-header">
           <BusinessIcon sx={{ marginRight: 1 }} />
           {open && <Typography sx={{fontSize: 14}}>Fees Ledger</Typography>}
@@ -945,8 +1038,10 @@ function DefaultStudentListItems({ open }) {
 
         </AccordionDetails>
         </Accordion>
+      </StudentMenuSection>
 
-          <Accordion>
+          <StudentMenuSection group="Certificates">
+<Accordion>
         <AccordionSummary aria-controls="panel3-content" id="panel3-header">
           <BusinessIcon sx={{ marginRight: 1 }} />
           {open && <Typography sx={{fontSize: 14}}>Certificates</Typography>}
@@ -974,8 +1069,10 @@ function DefaultStudentListItems({ open }) {
 
         </AccordionDetails>
         </Accordion>
+      </StudentMenuSection>
 
-         <Accordion>
+         <StudentMenuSection group="Breakout rooms">
+<Accordion>
         <AccordionSummary aria-controls="panel3-content" id="panel3-header">
           <BusinessIcon sx={{ marginRight: 1 }} />
           {open && <Typography sx={{fontSize: 14}}>Breakout rooms</Typography>}
@@ -991,8 +1088,10 @@ function DefaultStudentListItems({ open }) {
 
         </AccordionDetails>
         </Accordion>
+      </StudentMenuSection>
 
-          <Accordion>
+          <StudentMenuSection group="Discussion Board">
+<Accordion>
         <AccordionSummary aria-controls="panel3-content" id="panel3-header">
           <BusinessIcon sx={{ marginRight: 1 }} />
           {open && <Typography sx={{fontSize: 14}}>Discussion Board</Typography>}
@@ -1008,8 +1107,10 @@ function DefaultStudentListItems({ open }) {
 
         </AccordionDetails>
         </Accordion>
+      </StudentMenuSection>
 
-         <Accordion>
+         <StudentMenuSection group="Forum">
+<Accordion>
         <AccordionSummary aria-controls="panel3-content" id="panel3-header">
           <BusinessIcon sx={{ marginRight: 1 }} />
           {open && <Typography sx={{fontSize: 14}}>Forum</Typography>}
@@ -1025,6 +1126,7 @@ function DefaultStudentListItems({ open }) {
 
         </AccordionDetails>
         </Accordion>
+      </StudentMenuSection>
 
 
          <Accordion>
@@ -1072,19 +1174,54 @@ function DefaultStudentListItems({ open }) {
           {open && <Typography sx={{fontSize: 14}}>Examination</Typography>}
         </AccordionSummary>
         <AccordionDetails>
+          <ListItem button component={RouterLink} to="/student-internal-marks-view">
+            <ListItemIcon><AssignmentIcon /></ListItemIcon>
+            {open && <ListItemText primary="Internal marks view" />}
+          </ListItem>
+          <ListItem button component={RouterLink} to="/student-internal-marks-view-2">
+            <ListItemIcon><AssignmentIcon /></ListItemIcon>
+            {open && <ListItemText primaryTypographyProps={{ whiteSpace: 'normal' }} primary="Internal Marks View 2" />}
+          </ListItem>
+          <ListItem button component={RouterLink} to="/student-internal-marks-view-3">
+            <ListItemIcon><AssignmentIcon /></ListItemIcon>
+            {open && <ListItemText primaryTypographyProps={{ whiteSpace: 'normal' }} primary="Internal Marks View 3" />}
+          </ListItem>
 
-          <ListItem button component={RouterLink} to="/student-exam-registration">
+          {/* <ListItem button component={RouterLink} to="/student-exam-registration">
 <ListItemIcon>
 <PersonIcon />
 </ListItemIcon>
 {open && <ListItemText primaryTypographyProps={{fontSize: "14px"}} primary="Exam registration" />}
-</ListItem>
+</ListItem> */}
 
           <ListItem button component={RouterLink} to="/student-exam-dynamic-form">
 <ListItemIcon>
 <PersonIcon />
 </ListItemIcon>
 {open && <ListItemText primaryTypographyProps={{fontSize: "14px"}} primary="Dynamic exam form" />}
+</ListItem>
+
+          <ListItem button component={RouterLink} to="/student-exam-form-2">
+<ListItemIcon><PersonIcon /></ListItemIcon>
+{open && <ListItemText primaryTypographyProps={{fontSize: "14px"}} primary="Exam form 2" />}
+</ListItem>
+          <ListItem button component={RouterLink} to="/student-programwise-exam-form">
+<ListItemIcon>
+<PersonIcon />
+</ListItemIcon>
+{open && <ListItemText primaryTypographyProps={{fontSize: "14px"}} primary="Programwise form" />}
+</ListItem>
+
+          <ListItem button component={RouterLink} to="/student-programwise-exam-form-2">
+<ListItemIcon>
+<PersonIcon />
+</ListItemIcon>
+{open && <ListItemText primaryTypographyProps={{fontSize: "14px"}} primary="Programwise form 2" />}
+</ListItem>
+
+          <ListItem button component={RouterLink} to="/student-programwise-mastercode">
+<ListItemIcon><PersonIcon /></ListItemIcon>
+{open && <ListItemText primaryTypographyProps={{fontSize: "14px"}} primary="Programwise mastercode" />}
 </ListItem>
 
           <ListItem button component={RouterLink} to="/student-atkt-form">
@@ -1094,33 +1231,47 @@ function DefaultStudentListItems({ open }) {
 {open && <ListItemText primaryTypographyProps={{fontSize: "14px"}} primary="ATKT form" />}
 </ListItem>
 
-          <ListItem button component={RouterLink} to="/examapply">
+          <ListItem button component={RouterLink} to="/preapproved-regular-form">
+<ListItemIcon>
+<PersonIcon />
+</ListItemIcon>
+{open && <ListItemText primaryTypographyProps={{fontSize: "14px"}} primary="Preapproved regular form" />}
+</ListItem>
+
+          <ListItem button component={RouterLink} to="/preapproved-atkt-form">
+<ListItemIcon>
+<PersonIcon />
+</ListItemIcon>
+{open && <ListItemText primaryTypographyProps={{fontSize: "14px"}} primary="Preapproved ATKT form" />}
+</ListItem>
+
+          {/* <ListItem button component={RouterLink} to="/examapply">
 <ListItemIcon>
 <PersonIcon />
 </ListItemIcon>
 {open && <ListItemText primaryTypographyProps={{fontSize: "14px"}} primary="Apply for exam" />}
-</ListItem>
+</ListItem> */}
 
-<ListItem button component={RouterLink} to="/examapply1">
+{/* <ListItem button component={RouterLink} to="/examapply1">
 <ListItemIcon>
 <PersonIcon />
 </ListItemIcon>
 {open && <ListItemText primaryTypographyProps={{fontSize: "14px"}} primary="Apply for exam 1" />}
-</ListItem>
+</ListItem> */}
 
-          <ListItem button component={RouterLink} to="/dashapplyadmitstud">
+          {/* <ListItem button component={RouterLink} to="/dashapplyadmitstud">
 <ListItemIcon>
 <PersonIcon />
 </ListItemIcon>
 {open && <ListItemText primaryTypographyProps={{fontSize: "14px"}} primary="Student Registration form" />}
-</ListItem>
+</ListItem> */}
 
- <ListItem button component={RouterLink} to="/dashmexamadmitstud">
+ {/* <ListItem button component={RouterLink} to="/dashmexamadmitstud">
 <ListItemIcon>
 <PersonIcon />
 </ListItemIcon>
 {open && <ListItemText primaryTypographyProps={{fontSize: "14px"}} primary="My registration" />}
-</ListItem>
+</ListItem> */}
 
            {/* <ListItem button component={RouterLink} to="/examapplicationform">
 <ListItemIcon>
@@ -1169,7 +1320,8 @@ function DefaultStudentListItems({ open }) {
         </AccordionDetails>
         </Accordion>
 
-          <Accordion>
+          <StudentMenuSection group="Reevaluation">
+<Accordion>
         <AccordionSummary aria-controls="panel3-content" id="panel3-header">
           <BusinessIcon sx={{ marginRight: 1 }} />
           {open && <Typography sx={{fontSize: 14}}>Reevaluation</Typography>}
@@ -1194,6 +1346,7 @@ function DefaultStudentListItems({ open }) {
 
         </AccordionDetails>
         </Accordion>
+      </StudentMenuSection>
 
           <Accordion>
         <AccordionSummary aria-controls="panel-appeal-content" id="panel-appeal-header">
@@ -1212,7 +1365,8 @@ function DefaultStudentListItems({ open }) {
         </AccordionDetails>
         </Accordion>
 
-          <Accordion>
+          <StudentMenuSection group="Placement">
+<Accordion>
         <AccordionSummary aria-controls="panel3-content" id="panel3-header">
           <BusinessIcon sx={{ marginRight: 1 }} />
           {open && <Typography sx={{fontSize: 14}}>Placement</Typography>}
@@ -1235,8 +1389,10 @@ function DefaultStudentListItems({ open }) {
 
         </AccordionDetails>
         </Accordion>
+      </StudentMenuSection>
 
-      <Accordion>
+      <StudentMenuSection group="My data">
+<Accordion>
         <AccordionSummary aria-controls="panel1-content" id="panel1-header">
           <AccountCircleIcon sx={{ marginRight: 1 }} />
           {open && <Typography sx={{fontSize: 14}}>My data</Typography>}
@@ -1261,6 +1417,7 @@ function DefaultStudentListItems({ open }) {
 
         </AccordionDetails>
       </Accordion>
+      </StudentMenuSection>
 
 
       <Accordion>
@@ -1299,7 +1456,8 @@ function DefaultStudentListItems({ open }) {
         </AccordionDetails>
       </Accordion>
 
-      <Accordion>
+      <StudentMenuSection group="Virtual lab">
+<Accordion>
         <AccordionSummary aria-controls="panel1-content" id="panel1-header">
           <AccountCircleIcon sx={{ marginRight: 1 }} />
           {open && <Typography sx={{fontSize: 14}}>Virtual lab</Typography>}
@@ -1672,9 +1830,11 @@ function DefaultStudentListItems({ open }) {
 
         </AccordionDetails>
       </Accordion>
+      </StudentMenuSection>
      
      
-      <Accordion>
+      <StudentMenuSection group="Virtual Lab Games">
+<Accordion>
         <AccordionSummary aria-controls="panel3-content" id="panel3-header">
           <BusinessIcon sx={{ marginRight: 1 }} />
           {open && <Typography sx={{fontSize: 14}}>Virtual Lab Games</Typography>}
@@ -1957,6 +2117,7 @@ function DefaultStudentListItems({ open }) {
 
         </AccordionDetails>
       </Accordion>
+      </StudentMenuSection>
      
      
      

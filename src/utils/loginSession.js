@@ -22,6 +22,23 @@ export const applyLoginSession = async (responseData, options = {}) => {
 
   const user = responseData.user;
   const colid = responseData.colid;
+  const normalizedRole = String(responseData.role || "").trim().toLowerCase();
+  let subscriptiondeactivated = responseData.subscriptiondeactivated || "No";
+  const responseLoginExpired = /^yes$/i.test(String(responseData.loginexpired || responseData.loginExpired || responseData.accessExpired || ""));
+  try {
+    const subscriptionRes = await ep1.get("/api/v2/billing/subscription", { params: { colid } });
+    subscriptiondeactivated = /^no$/i.test(subscriptionRes.data?.data?.active) ? "Yes" : "No";
+    if (subscriptiondeactivated === "Yes" && String(responseData.role || "").trim().toLowerCase() !== "all") {
+      throw new Error("This account has been deactivated. Please contact administrator.");
+    }
+  } catch (error) {
+    if (/deactivated/i.test(error.message || "")) {
+      throw error;
+    }
+  }
+  if (responseLoginExpired && normalizedRole === "all") {
+    subscriptiondeactivated = "Yes";
+  }
   global1.studid = user;
   global1.user = user;
   global1.email = user;
@@ -38,6 +55,7 @@ export const applyLoginSession = async (responseData, options = {}) => {
   global1.semester = responseData.semester;
   global1.section = responseData.section;
   global1.role = responseData.role;
+  global1.subscriptiondeactivated = subscriptiondeactivated;
   global1.googleemail = responseData.googleemail;
   global1.aqaryear = "2020-21";
   global1.calendaryear = "2020";
@@ -49,7 +67,7 @@ export const applyLoginSession = async (responseData, options = {}) => {
     const lastlogin = new Date(responseData.lastlogin);
     global1.lastlogin = lastlogin.toString();
     const shouldEnforceExpiry = responseData.enforceLastLoginExpiry || responseData.loginexpired || responseData.loginExpired || responseData.accessExpired;
-    if (shouldEnforceExpiry && !Number.isNaN(lastlogin.getTime()) && lastlogin.getTime() < Date.now()) {
+    if (shouldEnforceExpiry && !Number.isNaN(lastlogin.getTime()) && lastlogin.getTime() < Date.now() && normalizedRole !== "all") {
       throw new Error("Login access is expired.");
     }
   }
@@ -80,7 +98,6 @@ export const applyLoginSession = async (responseData, options = {}) => {
     // Country configuration is optional.
   }
 
-  const normalizedRole = String(responseData.role || "").trim().toLowerCase();
   if (normalizedRole === "student") {
     try {
       const yearRes = await ep1.get("/api/v1/getcurrentyearbyprg", {
@@ -100,9 +117,19 @@ export const applyLoginSession = async (responseData, options = {}) => {
     return "/studentdashboard";
   }
 
+  if (responseData.token) {
+    try { await ep1.post('/api/v2/crm2-counselor-dashboard/login', { token: responseData.token }, { timeout: 5000 }); }
+    catch { /* Sign-in history must not prevent login when unavailable. */ }
+  }
+
   if (normalizedRole === "all") {
+    if (responseLoginExpired) return "/billing-user-extension";
+    if (subscriptiondeactivated === "Yes") return "/billing-invoices";
     return "/configuration";
   }
+
+  if (['counselor', 'counsellor'].includes(normalizedRole)) return '/counsellor-dashboard';
+  if (normalizedRole === 'telecaller') return '/telecaller-dashboard';
 
   if (await hasRoleChatbotDefinition({ colid, role: responseData.role })) {
     return "/ai-chatbot-help";
